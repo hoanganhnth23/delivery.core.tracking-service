@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ShipperIdentityProjection.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.entity</a> &gt; <span class="el_source">ShipperIdentityProjection.java</span></div><h1>ShipperIdentityProjection.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import java.time.LocalDateTime;
+import lombok.Getter;
+import lombok.Setter;
+
+/** Tracking-local principal to shipper mapping for REST and WebSocket publishers. */
+@Entity
+@Getter
+@Setter
+@Table(name = &quot;shipper_identity_projection&quot;)
+<span class="fc" id="L16">public class ShipperIdentityProjection {</span>
+    @Id @Column(name = &quot;principal_id&quot;) private Long principalId;
+    @Column(name = &quot;legacy_user_id&quot;, nullable = false, unique = true) private Long legacyUserId;
+    @Column(name = &quot;shipper_id&quot;, nullable = false, unique = true) private Long shipperId;
+    @Column(name = &quot;mapping_version&quot;, nullable = false) private Long mappingVersion;
+    @Column(name = &quot;updated_at&quot;, nullable = false) private LocalDateTime updatedAt;
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

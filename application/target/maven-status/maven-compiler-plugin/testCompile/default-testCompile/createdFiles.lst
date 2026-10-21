@@ -1,0 +1,17 @@
+com/delivery/tracking/application/DefaultDeliveryRoomSubscriptionUseCaseTest.class
+com/delivery/tracking/application/DefaultPublisherSessionUseCaseTest.class
+com/delivery/tracking/application/DefaultShipperAvailabilityUseCaseTest$Fixture.class
+com/delivery/tracking/application/DefaultTrackingServiceTest$Fixture.class
+com/delivery/tracking/application/DefaultTrackingServiceTest.class
+com/delivery/tracking/application/DefaultShipperIdentityInboxUseCaseTest$Store.class
+com/delivery/tracking/application/DefaultDeliveryRoomAssignmentUseCaseTest.class
+com/delivery/tracking/application/DefaultShipperIdentityInboxUseCaseTest.class
+com/delivery/tracking/application/DefaultDeliveryRoomAssignmentUseCaseTest$Ports.class
+com/delivery/tracking/application/DefaultShipperIdentityUseCaseTest.class
+com/delivery/tracking/application/DefaultPublisherSessionUseCaseTest$Fixture.class
+com/delivery/tracking/application/DefaultShipperAvailabilityUseCaseTest.class
+com/delivery/tracking/application/DefaultLocationHistoryUseCaseTest.class
+com/delivery/tracking/application/DefaultLocationFanoutUseCaseTest.class
+com/delivery/tracking/application/DefaultLocationHistoryUseCaseTest$Store.class
+com/delivery/tracking/application/DefaultDeliveryRoomSubscriptionUseCaseTest$Ports.class
+com/delivery/tracking/application/DefaultLocationFanoutUseCaseTest$Ports.class

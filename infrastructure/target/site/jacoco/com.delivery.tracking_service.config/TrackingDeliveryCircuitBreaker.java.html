@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>TrackingDeliveryCircuitBreaker.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.config</a> &gt; <span class="el_source">TrackingDeliveryCircuitBreaker.java</span></div><h1>TrackingDeliveryCircuitBreaker.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.config;
+
+import java.time.Duration;
+import java.util.function.Supplier;
+
+import org.springframework.stereotype.Component;
+
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import io.micrometer.core.instrument.MeterRegistry;
+
+/** Isolates the low-volume Tracking -&gt; Delivery access check. */
+@Component
+public class TrackingDeliveryCircuitBreaker {
+    private final CircuitBreaker circuitBreaker;
+
+<span class="nc" id="L18">    public TrackingDeliveryCircuitBreaker(DeliveryCallResilienceProperties properties, MeterRegistry meterRegistry) {</span>
+<span class="nc" id="L19">        circuitBreaker = CircuitBreaker.of(&quot;trackingDeliveryService&quot;, CircuitBreakerConfig.custom()</span>
+<span class="nc" id="L20">                .failureRateThreshold(properties.getFailureRateThreshold())</span>
+<span class="nc" id="L21">                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)</span>
+<span class="nc" id="L22">                .slidingWindowSize(properties.getSlidingWindowSize())</span>
+<span class="nc" id="L23">                .minimumNumberOfCalls(properties.getSlidingWindowSize())</span>
+<span class="nc" id="L24">                .waitDurationInOpenState(Duration.ofSeconds(properties.getWaitOpenSeconds()))</span>
+<span class="nc" id="L25">                .permittedNumberOfCallsInHalfOpenState(properties.getPermittedHalfOpenCalls())</span>
+<span class="nc" id="L26">                .build());</span>
+<span class="nc" id="L27">        circuitBreaker.getEventPublisher().onStateTransition(event -&gt; meterRegistry.counter(</span>
+                &quot;delivery.circuit.state_transition&quot;, &quot;circuit&quot;, &quot;trackingDeliveryService&quot;,
+<span class="nc" id="L29">                &quot;transition&quot;, event.getStateTransition().name()).increment());</span>
+<span class="nc" id="L30">    }</span>
+
+    public &lt;T&gt; T execute(Supplier&lt;T&gt; supplier) {
+<span class="nc" id="L33">        try { return circuitBreaker.executeSupplier(supplier); }</span>
+<span class="nc" id="L34">        catch (CallNotPermittedException exception) { throw new IllegalStateException(&quot;Delivery service circuit is open&quot;, exception); }</span>
+    }
+<span class="nc" id="L36">    CircuitBreaker circuitBreaker() { return circuitBreaker; }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

@@ -1,0 +1,9 @@
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultDeliveryRoomAssignmentUseCaseTest.java
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultDeliveryRoomSubscriptionUseCaseTest.java
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultLocationFanoutUseCaseTest.java
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultLocationHistoryUseCaseTest.java
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultPublisherSessionUseCaseTest.java
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultShipperAvailabilityUseCaseTest.java
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultShipperIdentityInboxUseCaseTest.java
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultShipperIdentityUseCaseTest.java
+/Users/a/Documents/private/delivery/backend_delivery/tracking/application/src/test/java/com/delivery/tracking/application/DefaultTrackingServiceTest.java

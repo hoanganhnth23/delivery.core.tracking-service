@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LocationHistoryCommandMapper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.service</a> &gt; <span class="el_source">LocationHistoryCommandMapper.java</span></div><h1>LocationHistoryCommandMapper.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.service;
+import com.delivery.tracking.application.api.LocationHistoryCommand;
+import com.delivery.tracking_service.dto.event.ShipperLocationUpdatedEvent;
+/** Transport facts only; raw payload is retained byte-for-byte for the core replay fence. */
+public final class LocationHistoryCommandMapper {
+    private LocationHistoryCommandMapper() {}
+    public static LocationHistoryCommand from(ShipperLocationUpdatedEvent event, String raw) {
+<span class="nc" id="L8">        return new LocationHistoryCommand(event.getShipperId(), event.getLatitude(), event.getLongitude(), event.getIsOnline(),</span>
+<span class="nc" id="L9">                event.getTimestamp(), event.getEventId(), event.getDeliveryId(), event.getAccuracy(), event.getSpeed(),</span>
+<span class="nc" id="L10">                event.getHeading(), event.getSource(), raw);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

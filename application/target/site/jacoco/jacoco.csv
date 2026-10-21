@@ -1,0 +1,10 @@
+GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
+tracking-application,com.delivery.tracking.application,DefaultShipperAvailabilityUseCase,6,172,0,10,2,26,1,13,1,8
+tracking-application,com.delivery.tracking.application,DefaultShipperIdentityInboxUseCase,12,188,0,34,4,32,1,22,1,5
+tracking-application,com.delivery.tracking.application,DefaultDeliveryRoomSubscriptionUseCase,0,69,0,10,0,12,0,8,0,3
+tracking-application,com.delivery.tracking.application,DefaultLocationHistoryUseCase,15,509,1,67,4,80,2,51,1,18
+tracking-application,com.delivery.tracking.application,DefaultShipperIdentityUseCase,0,70,0,14,0,13,0,9,0,2
+tracking-application,com.delivery.tracking.application,DefaultLocationFanoutUseCase,0,68,0,10,0,13,0,7,0,2
+tracking-application,com.delivery.tracking.application,DefaultDeliveryRoomAssignmentUseCase,0,217,0,26,0,31,0,18,0,5
+tracking-application,com.delivery.tracking.application,DefaultPublisherSessionUseCase,11,170,0,12,2,32,1,14,1,8
+tracking-application,com.delivery.tracking.application,DefaultTrackingService,6,140,0,12,2,27,1,11,1,5

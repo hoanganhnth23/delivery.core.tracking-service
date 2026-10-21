@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LocationHistoryKafkaConfig.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.config</a> &gt; <span class="el_source">LocationHistoryKafkaConfig.java</span></div><h1>LocationHistoryKafkaConfig.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.config;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.context.annotation.Primary;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.springframework.util.backoff.FixedBackOff;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/** Owns Kafka templates and recovery policies for Tracking's owned consumers. */
+@Configuration
+public class LocationHistoryKafkaConfig {
+
+    private final String bootstrapServers;
+    private final String groupId;
+    private final boolean listenerAutoStartup;
+
+    public LocationHistoryKafkaConfig(
+            @Value(&quot;${spring.kafka.bootstrap-servers:localhost:9092}&quot;) String bootstrapServers,
+            @Value(&quot;${app.kafka.groups.location-history:tracking-location-history}&quot;) String groupId,
+<span class="nc" id="L38">            @Value(&quot;${spring.kafka.listener.auto-startup:true}&quot;) boolean listenerAutoStartup) {</span>
+<span class="nc" id="L39">        this.bootstrapServers = bootstrapServers;</span>
+<span class="nc" id="L40">        this.groupId = groupId;</span>
+<span class="nc" id="L41">        this.listenerAutoStartup = listenerAutoStartup;</span>
+<span class="nc" id="L42">    }</span>
+
+    @Bean(&quot;locationHistoryConsumerFactory&quot;)
+    public DefaultKafkaConsumerFactory&lt;String, String&gt; locationHistoryConsumerFactory() {
+<span class="nc" id="L46">        Map&lt;String, Object&gt; properties = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L47">        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);</span>
+<span class="nc" id="L48">        properties.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);</span>
+<span class="nc" id="L49">        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);</span>
+<span class="nc" id="L50">        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);</span>
+<span class="nc" id="L51">        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, &quot;earliest&quot;);</span>
+<span class="nc" id="L52">        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);</span>
+<span class="nc" id="L53">        return new DefaultKafkaConsumerFactory&lt;&gt;(properties);</span>
+    }
+
+    /** Retry/DLT records are raw JSON; StringSerializer avoids JSON re-quoting. */
+    @Bean(&quot;trackingRetryKafkaTemplate&quot;)
+    public KafkaTemplate&lt;String, String&gt; trackingRetryKafkaTemplate() {
+<span class="nc" id="L59">        Map&lt;String, Object&gt; properties = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L60">        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);</span>
+<span class="nc" id="L61">        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);</span>
+<span class="nc" id="L62">        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);</span>
+<span class="nc" id="L63">        properties.put(ProducerConfig.ACKS_CONFIG, &quot;all&quot;);</span>
+<span class="nc" id="L64">        properties.put(ProducerConfig.RETRIES_CONFIG, 3);</span>
+<span class="nc" id="L65">        properties.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);</span>
+<span class="nc" id="L66">        return new KafkaTemplate&lt;&gt;(new DefaultKafkaProducerFactory&lt;&gt;(properties));</span>
+    }
+
+    /**
+     * Defining the raw-string recovery template makes Spring Boot back off its
+     * generic KafkaTemplate auto-configuration. Keep the normal location
+     * publisher independently available, with the established JSON contract,
+     * instead of accidentally removing realtime fan-out at startup.
+     */
+    @Bean(&quot;trackingKafkaTemplate&quot;)
+    @Primary
+    public KafkaTemplate&lt;String, Object&gt; trackingKafkaTemplate() {
+<span class="nc" id="L78">        Map&lt;String, Object&gt; properties = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L79">        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);</span>
+<span class="nc" id="L80">        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);</span>
+<span class="nc" id="L81">        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);</span>
+<span class="nc" id="L82">        properties.put(ProducerConfig.ACKS_CONFIG, &quot;all&quot;);</span>
+<span class="nc" id="L83">        properties.put(ProducerConfig.RETRIES_CONFIG, 3);</span>
+<span class="nc" id="L84">        properties.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);</span>
+<span class="nc" id="L85">        properties.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);</span>
+<span class="nc" id="L86">        return new KafkaTemplate&lt;&gt;(new DefaultKafkaProducerFactory&lt;&gt;(properties));</span>
+    }
+
+    @Bean(&quot;locationHistoryKafkaListenerContainerFactory&quot;)
+    public ConcurrentKafkaListenerContainerFactory&lt;String, String&gt; locationHistoryKafkaListenerContainerFactory(
+            @Qualifier(&quot;locationHistoryConsumerFactory&quot;) DefaultKafkaConsumerFactory&lt;String, String&gt; consumerFactory,
+            @Qualifier(&quot;locationHistoryKafkaErrorHandler&quot;) DefaultErrorHandler errorHandler) {
+<span class="nc" id="L93">        ConcurrentKafkaListenerContainerFactory&lt;String, String&gt; factory =</span>
+                new ConcurrentKafkaListenerContainerFactory&lt;&gt;();
+<span class="nc" id="L95">        factory.setConsumerFactory(consumerFactory);</span>
+<span class="nc" id="L96">        factory.setAutoStartup(listenerAutoStartup);</span>
+<span class="nc" id="L97">        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);</span>
+<span class="nc" id="L98">        factory.setCommonErrorHandler(errorHandler);</span>
+<span class="nc" id="L99">        return factory;</span>
+    }
+
+    /** Routing is rebuildable, but malformed status facts must not be ACKed away. */
+    @Bean(&quot;deliveryRoomsKafkaListenerContainerFactory&quot;)
+    public ConcurrentKafkaListenerContainerFactory&lt;String, String&gt; deliveryRoomsKafkaListenerContainerFactory(
+            @Qualifier(&quot;deliveryRoomsConsumerFactory&quot;) DefaultKafkaConsumerFactory&lt;String, String&gt; consumerFactory,
+            @Qualifier(&quot;deliveryRoomsKafkaErrorHandler&quot;) DefaultErrorHandler errorHandler) {
+<span class="nc" id="L107">        ConcurrentKafkaListenerContainerFactory&lt;String, String&gt; factory =</span>
+                new ConcurrentKafkaListenerContainerFactory&lt;&gt;();
+<span class="nc" id="L109">        factory.setConsumerFactory(consumerFactory);</span>
+<span class="nc" id="L110">        factory.setAutoStartup(listenerAutoStartup);</span>
+<span class="nc" id="L111">        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);</span>
+<span class="nc" id="L112">        factory.setCommonErrorHandler(errorHandler);</span>
+<span class="nc" id="L113">        return factory;</span>
+    }
+
+    @Bean(&quot;deliveryRoomsConsumerFactory&quot;)
+    public DefaultKafkaConsumerFactory&lt;String, String&gt; deliveryRoomsConsumerFactory(
+            @Value(&quot;${app.kafka.groups.delivery-rooms:tracking-delivery-rooms}&quot;) String deliveryRoomsGroupId) {
+<span class="nc" id="L119">        Map&lt;String, Object&gt; properties = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L120">        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);</span>
+<span class="nc" id="L121">        properties.put(ConsumerConfig.GROUP_ID_CONFIG, deliveryRoomsGroupId);</span>
+<span class="nc" id="L122">        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);</span>
+<span class="nc" id="L123">        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);</span>
+<span class="nc" id="L124">        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, &quot;earliest&quot;);</span>
+<span class="nc" id="L125">        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);</span>
+<span class="nc" id="L126">        return new DefaultKafkaConsumerFactory&lt;&gt;(properties);</span>
+    }
+
+    @Bean(&quot;locationHistoryDeadLetterRecoverer&quot;)
+    public DeadLetterPublishingRecoverer locationHistoryDeadLetterRecoverer(
+            @Qualifier(&quot;trackingRetryKafkaTemplate&quot;) KafkaTemplate&lt;String, String&gt; kafkaTemplate) {
+<span class="nc" id="L132">        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,</span>
+<span class="nc" id="L133">                (record, exception) -&gt; new TopicPartition(ownerDltTopic(record.topic()), record.partition()));</span>
+<span class="nc" id="L134">        recoverer.setFailIfSendResultIsError(true);</span>
+<span class="nc" id="L135">        return recoverer;</span>
+    }
+
+    @Bean(&quot;locationHistoryKafkaErrorHandler&quot;)
+    public DefaultErrorHandler locationHistoryKafkaErrorHandler(
+            @Qualifier(&quot;locationHistoryDeadLetterRecoverer&quot;) DeadLetterPublishingRecoverer recoverer,
+            MeterRegistry meterRegistry) {
+<span class="nc" id="L142">        DefaultErrorHandler handler = new DefaultErrorHandler((record, error) -&gt; {</span>
+<span class="nc" id="L143">            meterRegistry.counter(&quot;delivery.kafka.events&quot;, &quot;event&quot;, &quot;dlt&quot;).increment();</span>
+<span class="nc" id="L144">            recoverer.accept(record, error);</span>
+<span class="nc" id="L145">        }, new FixedBackOff(1000L, 2));</span>
+<span class="nc" id="L146">        handler.addNotRetryableExceptions(IllegalArgumentException.class);</span>
+<span class="nc" id="L147">        handler.setRetryListeners(new org.springframework.kafka.listener.RetryListener() {</span>
+            @Override public void failedDelivery(org.apache.kafka.clients.consumer.ConsumerRecord&lt;?, ?&gt; record,
+                                                 Exception error, int attempt) {
+<span class="nc" id="L150">                meterRegistry.counter(&quot;delivery.kafka.events&quot;, &quot;event&quot;, &quot;retry&quot;).increment();</span>
+<span class="nc" id="L151">            }</span>
+        });
+<span class="nc" id="L153">        handler.setCommitRecovered(true);</span>
+<span class="nc" id="L154">        return handler;</span>
+    }
+
+    @Bean(&quot;deliveryRoomsDeadLetterRecoverer&quot;)
+    public DeadLetterPublishingRecoverer deliveryRoomsDeadLetterRecoverer(
+            @Qualifier(&quot;trackingRetryKafkaTemplate&quot;) KafkaTemplate&lt;String, String&gt; kafkaTemplate) {
+<span class="nc" id="L160">        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,</span>
+<span class="nc" id="L161">                (record, exception) -&gt; new TopicPartition(record.topic() + &quot;.tracking.DLT&quot;, record.partition()));</span>
+<span class="nc" id="L162">        recoverer.setFailIfSendResultIsError(true);</span>
+<span class="nc" id="L163">        return recoverer;</span>
+    }
+
+    @Bean(&quot;deliveryRoomsKafkaErrorHandler&quot;)
+    public DefaultErrorHandler deliveryRoomsKafkaErrorHandler(
+            @Qualifier(&quot;deliveryRoomsDeadLetterRecoverer&quot;) DeadLetterPublishingRecoverer recoverer,
+            MeterRegistry meterRegistry) {
+<span class="nc" id="L170">        DefaultErrorHandler handler = new DefaultErrorHandler((record, error) -&gt; {</span>
+<span class="nc" id="L171">            meterRegistry.counter(&quot;delivery.kafka.events&quot;, &quot;event&quot;, &quot;dlt&quot;).increment();</span>
+<span class="nc" id="L172">            recoverer.accept(record, error);</span>
+<span class="nc" id="L173">        }, new FixedBackOff(1000L, 2));</span>
+<span class="nc" id="L174">        handler.addNotRetryableExceptions(IllegalArgumentException.class);</span>
+<span class="nc" id="L175">        handler.setRetryListeners(new org.springframework.kafka.listener.RetryListener() {</span>
+            @Override public void failedDelivery(org.apache.kafka.clients.consumer.ConsumerRecord&lt;?, ?&gt; record,
+                                                 Exception error, int attempt) {
+<span class="nc" id="L178">                meterRegistry.counter(&quot;delivery.kafka.events&quot;, &quot;event&quot;, &quot;retry&quot;).increment();</span>
+<span class="nc" id="L179">            }</span>
+        });
+<span class="nc" id="L181">        handler.setCommitRecovered(true);</span>
+<span class="nc" id="L182">        return handler;</span>
+    }
+
+    // Package-visible for configuration tests.
+    static String ownerDltTopic(String topic) {
+<span class="nc" id="L187">        return topic.replaceFirst(&quot;-retry-tracking-\\d+$&quot;, &quot;&quot;) + &quot;.tracking.DLT&quot;;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

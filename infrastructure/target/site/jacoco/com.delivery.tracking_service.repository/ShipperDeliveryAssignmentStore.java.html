@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ShipperDeliveryAssignmentStore.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.repository</a> &gt; <span class="el_source">ShipperDeliveryAssignmentStore.java</span></div><h1>ShipperDeliveryAssignmentStore.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.repository;
+
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.stereotype.Repository;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.HashSet;
+
+/** Shared Redis routing projection derived from durable shipper status events. */
+@Repository
+public class ShipperDeliveryAssignmentStore implements com.delivery.tracking.application.api.DeliveryRoomAssignmentPort {
+
+    private static final String PREFIX = &quot;tracking:shipper:active-delivery:&quot;;
+    private static final String BATCH_PREFIX = &quot;tracking:shipper:active-deliveries:&quot;;
+    private static final String BATCH_FENCE_PREFIX = &quot;tracking:shipper:active-delivery-fence:&quot;;
+    private static final String TERMINAL_PREFIX = &quot;tracking:shipper:assignment-terminal:&quot;;
+    private static final String BATCH_TERMINAL_PREFIX = &quot;tracking:shipper:batch-assignment-terminal:&quot;;
+<span class="nc" id="L22">    private static final Duration TTL = Duration.ofHours(24);</span>
+    /**
+     * Kafka partitions prevent duplicate execution only inside one consumer
+     * group. The routing projection is shared by Tracking replicas, so its
+     * stale-event fence must be evaluated and written atomically in Redis.
+     */
+<span class="nc" id="L28">    private static final DefaultRedisScript&lt;Long&gt; APPLY_BUSY = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            local current = redis.call('GET', KEYS[1])
+            local incomingTimestamp = tonumber(ARGV[2])
+            local terminal = redis.call('GET', KEYS[2])
+            if terminal then
+              local terminalTimestamp = tonumber(terminal)
+              if not terminalTimestamp then return -2 end
+              if terminalTimestamp &gt;= incomingTimestamp then return 0 end
+            end
+            if current then
+              local first = string.find(current, '|')
+              local second = first and string.find(current, '|', first + 1) or nil
+              if not second then return -2 end
+              local currentDelivery = string.sub(current, 1, first - 1)
+              local currentTimestamp = tonumber(string.sub(current, first + 1, second - 1))
+              local currentEventId = string.sub(current, second + 1)
+              if not currentTimestamp then return -2 end
+              if currentTimestamp &gt; incomingTimestamp then return 0 end
+              if currentTimestamp == incomingTimestamp then
+                if currentDelivery == ARGV[1] and currentEventId == ARGV[3] then return 0 end
+                return -1
+              end
+            end
+            redis.call('SET', KEYS[1], ARGV[1] .. '|' .. ARGV[2] .. '|' .. ARGV[3], 'EX', tonumber(ARGV[4]))
+            return 1
+            &quot;&quot;&quot;, Long.class);
+<span class="nc" id="L54">    private static final DefaultRedisScript&lt;Long&gt; APPLY_AVAILABLE = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            local incoming = tonumber(ARGV[2])
+            local terminal = redis.call('GET', KEYS[2])
+            local terminalTimestamp = terminal and tonumber(terminal) or nil
+            if terminal and not terminalTimestamp then return -2 end
+            if terminalTimestamp and terminalTimestamp &gt; incoming then return 0 end
+            local current = redis.call('GET', KEYS[1])
+            if current then
+              local first = string.find(current, '|')
+              local second = first and string.find(current, '|', first + 1) or nil
+              if not second then return -2 end
+              local currentDelivery = string.sub(current, 1, first - 1)
+              local currentTimestamp = tonumber(string.sub(current, first + 1, second - 1))
+              if not currentTimestamp then return -2 end
+              if currentDelivery ~= ARGV[1] or currentTimestamp &gt; incoming then return 0 end
+            elseif terminalTimestamp and terminalTimestamp == incoming then return 0 end
+            redis.call('SET', KEYS[2], ARGV[2], 'EX', tonumber(ARGV[3]))
+            redis.call('DEL', KEYS[1])
+            return 1
+            &quot;&quot;&quot;, Long.class);
+    private final StringRedisTemplate redis;
+
+<span class="nc" id="L76">    private static final DefaultRedisScript&lt;Long&gt; APPLY_BATCH_BUSY = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            local current = redis.call('GET', KEYS[2])
+            local incoming = tonumber(ARGV[2])
+            local terminal = redis.call('GET', KEYS[3])
+            if terminal then
+              local terminalTimestamp = tonumber(terminal)
+              if not terminalTimestamp then return -2 end
+              if terminalTimestamp &gt;= incoming then return 0 end
+            end
+            if current then
+              local sep = string.find(current, '|')
+              if not sep then return -2 end
+              local timestamp = tonumber(string.sub(current, 1, sep - 1))
+              local eventId = string.sub(current, sep + 1)
+              if not timestamp then return -2 end
+              if timestamp &gt; incoming then return 0 end
+              if timestamp == incoming then
+                if eventId == ARGV[3] then return 0 end
+                return -1
+              end
+            end
+            redis.call('SET', KEYS[2], ARGV[2] .. '|' .. ARGV[3], 'EX', tonumber(ARGV[4]))
+            redis.call('SADD', KEYS[1], ARGV[1])
+            redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4]))
+            return 1
+            &quot;&quot;&quot;, Long.class);
+<span class="nc" id="L102">    private static final DefaultRedisScript&lt;Long&gt; APPLY_BATCH_AVAILABLE = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            local incoming = tonumber(ARGV[2])
+            local terminal = redis.call('GET', KEYS[3])
+            local terminalTimestamp = terminal and tonumber(terminal) or nil
+            if terminal and not terminalTimestamp then return -2 end
+            if terminalTimestamp and terminalTimestamp &gt; incoming then return 0 end
+            local current = redis.call('GET', KEYS[2])
+            if current then
+              local sep = string.find(current, '|')
+              if not sep then return -2 end
+              local timestamp = tonumber(string.sub(current, 1, sep - 1))
+              if not timestamp then return -2 end
+              if timestamp &gt; incoming then return 0 end
+            elseif terminalTimestamp and terminalTimestamp == incoming then return 0 end
+            redis.call('SET', KEYS[3], ARGV[2], 'EX', tonumber(ARGV[3]))
+            redis.call('DEL', KEYS[2])
+            redis.call('SREM', KEYS[1], ARGV[1])
+            return 1
+            &quot;&quot;&quot;, Long.class);
+
+<span class="nc" id="L122">    public ShipperDeliveryAssignmentStore(StringRedisTemplate redis) {</span>
+<span class="nc" id="L123">        this.redis = redis;</span>
+<span class="nc" id="L124">    }</span>
+
+    public void busy(long shipperId, long deliveryId, long timestamp, String eventId) {
+<span class="nc bnc" id="L127" title="All 10 branches missed.">        if (shipperId &lt;= 0 || deliveryId &lt;= 0 || timestamp &lt;= 0 || eventId == null || eventId.isBlank()) {</span>
+<span class="nc" id="L128">            throw new IllegalArgumentException(&quot;positive assignment identity/timestamp and eventId are required&quot;);</span>
+        }
+<span class="nc" id="L130">        Long result = redis.execute(APPLY_BUSY, List.of(key(shipperId), terminalKey(shipperId)), Long.toString(deliveryId),</span>
+<span class="nc" id="L131">                Long.toString(timestamp), eventId, Long.toString(TTL.toSeconds()));</span>
+<span class="nc bnc" id="L132" title="All 4 branches missed.">        if (result == null || result == -2L) {</span>
+<span class="nc" id="L133">            throw new IllegalStateException(&quot;Corrupt shipper assignment projection&quot;);</span>
+        }
+<span class="nc bnc" id="L135" title="All 2 branches missed.">        if (result == -1L) {</span>
+<span class="nc" id="L136">            throw new IllegalArgumentException(&quot;Conflicting shipper assignment events share the same timestamp&quot;);</span>
+        }
+<span class="nc" id="L138">    }</span>
+
+    public void available(long shipperId, long deliveryId, long timestamp) {
+<span class="nc bnc" id="L141" title="All 6 branches missed.">        if (shipperId &lt;= 0 || deliveryId &lt;= 0 || timestamp &lt;= 0) {</span>
+<span class="nc" id="L142">            throw new IllegalArgumentException(&quot;positive assignment identity and timestamp are required&quot;);</span>
+        }
+<span class="nc" id="L144">        Long result = redis.execute(APPLY_AVAILABLE, List.of(key(shipperId), terminalKey(shipperId)), Long.toString(deliveryId),</span>
+<span class="nc" id="L145">                Long.toString(timestamp), Long.toString(TTL.toSeconds()));</span>
+<span class="nc bnc" id="L146" title="All 4 branches missed.">        if (result == null || result == -2L) {</span>
+<span class="nc" id="L147">            throw new IllegalStateException(&quot;Corrupt shipper assignment projection&quot;);</span>
+        }
+<span class="nc" id="L149">    }</span>
+
+    public void busyBatch(long shipperId, long deliveryId, long timestamp, String eventId) {
+<span class="nc" id="L152">        validate(shipperId, deliveryId, timestamp, eventId);</span>
+<span class="nc" id="L153">        Long result = redis.execute(APPLY_BATCH_BUSY,</span>
+<span class="nc" id="L154">                List.of(batchKey(shipperId), batchFenceKey(shipperId, deliveryId), batchTerminalKey(shipperId, deliveryId)),</span>
+<span class="nc" id="L155">                Long.toString(deliveryId), Long.toString(timestamp), eventId, Long.toString(TTL.toSeconds()));</span>
+<span class="nc bnc" id="L156" title="All 4 branches missed.">        if (result == null || result == -2L) throw new IllegalStateException(&quot;Corrupt batch assignment projection&quot;);</span>
+<span class="nc bnc" id="L157" title="All 2 branches missed.">        if (result == -1L) throw new IllegalArgumentException(&quot;Conflicting batch assignment events share the same timestamp&quot;);</span>
+<span class="nc" id="L158">    }</span>
+
+    public void availableBatch(long shipperId, long deliveryId, long timestamp) {
+<span class="nc bnc" id="L161" title="All 6 branches missed.">        if (shipperId &lt;= 0 || deliveryId &lt;= 0 || timestamp &lt;= 0) {</span>
+<span class="nc" id="L162">            throw new IllegalArgumentException(&quot;positive batch assignment identity and timestamp are required&quot;);</span>
+        }
+<span class="nc" id="L164">        Long result = redis.execute(APPLY_BATCH_AVAILABLE,</span>
+<span class="nc" id="L165">                List.of(batchKey(shipperId), batchFenceKey(shipperId, deliveryId), batchTerminalKey(shipperId, deliveryId)),</span>
+<span class="nc" id="L166">                Long.toString(deliveryId), Long.toString(timestamp), Long.toString(TTL.toSeconds()));</span>
+<span class="nc bnc" id="L167" title="All 4 branches missed.">        if (result == null || result == -2L) throw new IllegalStateException(&quot;Corrupt batch assignment projection&quot;);</span>
+<span class="nc" id="L168">    }</span>
+
+    public Optional&lt;Long&gt; activeDelivery(long shipperId) {
+<span class="nc" id="L171">        Set&lt;Long&gt; batch = activeDeliveries(shipperId);</span>
+<span class="nc bnc" id="L172" title="All 2 branches missed.">        if (!batch.isEmpty()) return batch.stream().sorted().findFirst();</span>
+<span class="nc" id="L173">        return read(shipperId).map(Assignment::deliveryId);</span>
+    }
+
+    public Set&lt;Long&gt; activeDeliveries(long shipperId) {
+<span class="nc bnc" id="L177" title="All 2 branches missed.">        Set&lt;String&gt; members = redis.opsForSet() == null ? null : redis.opsForSet().members(batchKey(shipperId));</span>
+<span class="nc" id="L178">        Set&lt;Long&gt; result = new HashSet&lt;&gt;();</span>
+<span class="nc bnc" id="L179" title="All 4 branches missed.">        if (members != null &amp;&amp; !members.isEmpty()) {</span>
+<span class="nc" id="L180">            var batchIds = new java.util.ArrayList&lt;Long&gt;(members.size());</span>
+<span class="nc bnc" id="L181" title="All 2 branches missed.">            for (String member : members) {</span>
+<span class="nc" id="L182">                try { batchIds.add(Long.parseLong(member)); } catch (NumberFormatException ignored) { }</span>
+<span class="nc" id="L183">            }</span>
+<span class="nc bnc" id="L184" title="All 2 branches missed.">            if (!batchIds.isEmpty()) {</span>
+                // A sibling renews the shared set, but only an item's own fence retains its routing lifetime.
+<span class="nc" id="L186">                var fences = redis.opsForValue().multiGet(batchIds.stream()</span>
+<span class="nc" id="L187">                        .map(deliveryId -&gt; batchFenceKey(shipperId, deliveryId)).toList());</span>
+<span class="nc bnc" id="L188" title="All 4 branches missed.">                if (fences == null || fences.size() != batchIds.size()) {</span>
+<span class="nc" id="L189">                    throw new IllegalStateException(&quot;Cannot read batch assignment fences&quot;);</span>
+                }
+<span class="nc bnc" id="L191" title="All 2 branches missed.">                for (int index = 0; index &lt; batchIds.size(); index++) {</span>
+<span class="nc bnc" id="L192" title="All 2 branches missed.">                    if (fences.get(index) != null) result.add(batchIds.get(index));</span>
+                }
+            }
+        }
+<span class="nc" id="L196">        read(shipperId).map(Assignment::deliveryId).ifPresent(result::add);</span>
+<span class="nc" id="L197">        return result;</span>
+    }
+
+    private void validate(long shipperId, long deliveryId, long timestamp, String eventId) {
+<span class="nc bnc" id="L201" title="All 10 branches missed.">        if (shipperId &lt;= 0 || deliveryId &lt;= 0 || timestamp &lt;= 0 || eventId == null || eventId.isBlank()) {</span>
+<span class="nc" id="L202">            throw new IllegalArgumentException(&quot;positive assignment identity/timestamp and eventId are required&quot;);</span>
+        }
+<span class="nc" id="L204">    }</span>
+
+    private Optional&lt;Assignment&gt; read(long shipperId) {
+<span class="nc" id="L207">        String value = redis.opsForValue().get(key(shipperId));</span>
+<span class="nc bnc" id="L208" title="All 4 branches missed.">        if (value == null || value.isBlank()) return Optional.empty();</span>
+<span class="nc" id="L209">        String[] fields = value.split(&quot;\\|&quot;, 3);</span>
+<span class="nc bnc" id="L210" title="All 2 branches missed.">        if (fields.length != 3) throw new IllegalStateException(&quot;Corrupt shipper assignment projection&quot;);</span>
+<span class="nc" id="L211">        return Optional.of(new Assignment(Long.parseLong(fields[0]), Long.parseLong(fields[1]), fields[2]));</span>
+    }
+
+    private String key(long shipperId) {
+<span class="nc" id="L215">        return PREFIX + shipperId;</span>
+    }
+
+<span class="nc" id="L218">    private String terminalKey(long shipperId) { return TERMINAL_PREFIX + shipperId; }</span>
+<span class="nc" id="L219">    private String batchTerminalKey(long shipperId, long deliveryId) { return BATCH_TERMINAL_PREFIX + shipperId + &quot;:&quot; + deliveryId; }</span>
+
+<span class="nc" id="L221">    private String batchKey(long shipperId) { return BATCH_PREFIX + shipperId; }</span>
+
+    private String batchFenceKey(long shipperId, long deliveryId) {
+<span class="nc" id="L224">        return BATCH_FENCE_PREFIX + shipperId + &quot;:&quot; + deliveryId;</span>
+    }
+
+<span class="nc" id="L227">    private record Assignment(long deliveryId, long timestamp, String eventId) {}</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

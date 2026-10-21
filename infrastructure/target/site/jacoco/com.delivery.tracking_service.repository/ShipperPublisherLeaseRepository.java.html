@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ShipperPublisherLeaseRepository.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.repository</a> &gt; <span class="el_source">ShipperPublisherLeaseRepository.java</span></div><h1>ShipperPublisherLeaseRepository.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.repository;
+
+import com.delivery.tracking.domain.PublisherLease;
+import com.delivery.tracking.domain.PublisherExpiryClaim;
+import com.delivery.tracking.application.api.PublisherLeaseStorePort;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.ArrayList;
+
+@Repository
+@RequiredArgsConstructor
+public class ShipperPublisherLeaseRepository implements PublisherLeaseStorePort {
+
+    static final String GENERATION_PREFIX = &quot;tracking:publisher:generation:&quot;;
+    static final String ACTIVE_PREFIX = &quot;tracking:publisher:active:&quot;;
+    static final String DEADLINES_KEY = &quot;tracking:publisher:deadlines&quot;;
+
+<span class="nc" id="L22">    private static final DefaultRedisScript&lt;Long&gt; ACQUIRE = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            local current = redis.call('GET', KEYS[2])
+            if current then
+              redis.call('ZREM', KEYS[3], ARGV[3] .. current)
+            end
+            local generation = redis.call('INCR', KEYS[1])
+            redis.call('SET', KEYS[2], tostring(generation) .. ':' .. ARGV[1], 'EX', ARGV[2])
+            local now = redis.call('TIME')
+            local deadline = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000) + tonumber(ARGV[2]) * 1000
+            redis.call('ZADD', KEYS[3], deadline, ARGV[3] .. tostring(generation) .. ':' .. ARGV[1])
+            return generation
+            &quot;&quot;&quot;, Long.class);
+<span class="nc" id="L34">    private static final DefaultRedisScript&lt;Long&gt; REFRESH = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+              return 0
+            end
+            redis.call('EXPIRE', KEYS[1], ARGV[2])
+            local now = redis.call('TIME')
+            local deadline = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000) + tonumber(ARGV[2]) * 1000
+            redis.call('ZADD', KEYS[2], deadline, ARGV[3])
+            return 1
+            &quot;&quot;&quot;, Long.class);
+<span class="nc" id="L44">    private static final DefaultRedisScript&lt;Long&gt; RELEASE = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+              return 0
+            end
+            redis.call('DEL', KEYS[1])
+            local now = redis.call('TIME')
+            local deadline = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000) + tonumber(ARGV[3]) * 1000
+            redis.call('ZADD', KEYS[2], deadline, ARGV[2])
+            return 1
+            &quot;&quot;&quot;, Long.class);
+<span class="nc" id="L54">    private static final DefaultRedisScript&lt;Long&gt; SHOULD_MARK_OFFLINE = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+              return 0
+            end
+            if redis.call('EXISTS', KEYS[2]) == 1 then
+              return 0
+            end
+            return 1
+            &quot;&quot;&quot;, Long.class);
+    @SuppressWarnings(&quot;rawtypes&quot;)
+<span class="nc" id="L64">    private static final DefaultRedisScript&lt;List&gt; CLAIM_EXPIRED = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            local time = redis.call('TIME')
+            local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+            local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, ARGV[1])
+            if #expired == 0 then return {} end
+            local claimUntil = now + tonumber(ARGV[2]) * 1000
+            local claimed = {string.format('%.0f', claimUntil)}
+            for _, member in ipairs(expired) do
+              redis.call('ZADD', KEYS[1], claimUntil, member)
+              table.insert(claimed, member)
+            end
+            return claimed
+            &quot;&quot;&quot;, List.class);
+<span class="nc" id="L77">    private static final DefaultRedisScript&lt;Long&gt; COMPLETE_CLAIM = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+            if not score or tonumber(score) ~= tonumber(ARGV[2]) then
+              return 0
+            end
+            local now = redis.call('TIME')
+            if tonumber(score) &lt;= tonumber(now[1]) * 1000 + tonumber(now[2]) / 1000 then
+              return 0
+            end
+            return redis.call('ZREM', KEYS[1], ARGV[1])
+            &quot;&quot;&quot;, Long.class);
+<span class="nc" id="L88">    private static final DefaultRedisScript&lt;Long&gt; CLAIM_IF_EXPIRED = new DefaultRedisScript&lt;&gt;(&quot;&quot;&quot;</span>
+            local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+            local time = redis.call('TIME')
+            local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+            if not score or tonumber(score) &gt; now then
+              return 0
+            end
+            local claimUntil = now + tonumber(ARGV[2]) * 1000
+            redis.call('ZADD', KEYS[1], claimUntil, ARGV[1])
+            return claimUntil
+            &quot;&quot;&quot;, Long.class);
+
+    private final StringRedisTemplate redisTemplate;
+
+    public PublisherLease acquire(Long shipperId, String sessionId, long leaseTtlSeconds) {
+<span class="nc" id="L103">        Long generation = redisTemplate.execute(</span>
+                ACQUIRE,
+<span class="nc" id="L105">                List.of(generationKey(shipperId), activeKey(shipperId), DEADLINES_KEY),</span>
+                sessionId,
+<span class="nc" id="L107">                Long.toString(Math.max(1, leaseTtlSeconds)),</span>
+                shipperId + &quot;:&quot;);
+<span class="nc bnc" id="L109" title="All 4 branches missed.">        if (generation == null || generation &lt;= 0) {</span>
+<span class="nc" id="L110">            throw new IllegalStateException(&quot;Cannot acquire shipper publisher generation&quot;);</span>
+        }
+<span class="nc" id="L112">        return new PublisherLease(shipperId, sessionId, generation);</span>
+    }
+
+    public boolean refreshIfCurrent(PublisherLease lease, long leaseTtlSeconds) {
+<span class="nc" id="L116">        Long refreshed = redisTemplate.execute(</span>
+                REFRESH,
+<span class="nc" id="L118">                List.of(activeKey(lease.shipperId()), DEADLINES_KEY),</span>
+<span class="nc" id="L119">                lease.redisValue(),</span>
+<span class="nc" id="L120">                Long.toString(Math.max(1, leaseTtlSeconds)),</span>
+<span class="nc" id="L121">                deadlineMember(lease));</span>
+<span class="nc" id="L122">        return Long.valueOf(1L).equals(refreshed);</span>
+    }
+
+    public boolean releaseForGraceIfCurrent(PublisherLease lease, long disconnectGraceSeconds) {
+<span class="nc" id="L126">        Long released = redisTemplate.execute(</span>
+                RELEASE,
+<span class="nc" id="L128">                List.of(activeKey(lease.shipperId()), DEADLINES_KEY),</span>
+<span class="nc" id="L129">                lease.redisValue(),</span>
+<span class="nc" id="L130">                deadlineMember(lease),</span>
+<span class="nc" id="L131">                Long.toString(Math.max(1, disconnectGraceSeconds)));</span>
+<span class="nc" id="L132">        return Long.valueOf(1L).equals(released);</span>
+    }
+
+    public boolean shouldMarkOfflineAfterGrace(PublisherLease lease) {
+<span class="nc" id="L136">        Long shouldMarkOffline = redisTemplate.execute(</span>
+                SHOULD_MARK_OFFLINE,
+<span class="nc" id="L138">                List.of(generationKey(lease.shipperId()), activeKey(lease.shipperId())),</span>
+<span class="nc" id="L139">                Long.toString(lease.generation()));</span>
+<span class="nc" id="L140">        return Long.valueOf(1L).equals(shouldMarkOffline);</span>
+    }
+
+    @SuppressWarnings(&quot;unchecked&quot;)
+    public List&lt;PublisherExpiryClaim&gt; claimExpired(int limit, long claimSeconds) {
+<span class="nc" id="L145">        List&lt;String&gt; members = (List&lt;String&gt;) redisTemplate.execute(</span>
+                CLAIM_EXPIRED,
+<span class="nc" id="L147">                List.of(DEADLINES_KEY),</span>
+<span class="nc" id="L148">                Integer.toString(Math.max(1, limit)),</span>
+<span class="nc" id="L149">                Long.toString(Math.max(1, claimSeconds)));</span>
+<span class="nc bnc" id="L150" title="All 4 branches missed.">        if (members == null || members.isEmpty()) {</span>
+<span class="nc" id="L151">            return List.of();</span>
+        }
+<span class="nc" id="L153">        long claimUntil = Long.parseLong(members.get(0));</span>
+<span class="nc" id="L154">        List&lt;PublisherExpiryClaim&gt; claims = new ArrayList&lt;&gt;(members.size() - 1);</span>
+<span class="nc bnc" id="L155" title="All 2 branches missed.">        for (String member : members.subList(1, members.size())) {</span>
+<span class="nc" id="L156">            String[] parts = member.split(&quot;:&quot;, 3);</span>
+<span class="nc bnc" id="L157" title="All 2 branches missed.">            if (parts.length != 3) {</span>
+<span class="nc" id="L158">                throw new IllegalStateException(&quot;Invalid publisher deadline member&quot;);</span>
+            }
+<span class="nc" id="L160">            claims.add(new PublisherExpiryClaim(</span>
+                    new PublisherLease(
+<span class="nc" id="L162">                            Long.parseLong(parts[0]), parts[2], Long.parseLong(parts[1])),</span>
+                    claimUntil));
+<span class="nc" id="L164">        }</span>
+<span class="nc" id="L165">        return List.copyOf(claims);</span>
+    }
+
+    public boolean completeClaim(PublisherExpiryClaim claim) {
+<span class="nc" id="L169">        Long completed = redisTemplate.execute(</span>
+                COMPLETE_CLAIM,
+<span class="nc" id="L171">                List.of(DEADLINES_KEY),</span>
+<span class="nc" id="L172">                deadlineMember(claim.lease()),</span>
+<span class="nc" id="L173">                Long.toString(claim.claimUntilEpochMillis()));</span>
+<span class="nc" id="L174">        return Long.valueOf(1L).equals(completed);</span>
+    }
+
+    public PublisherExpiryClaim claimIfExpired(PublisherLease lease, long claimSeconds) {
+<span class="nc" id="L178">        Long claimed = redisTemplate.execute(</span>
+                CLAIM_IF_EXPIRED,
+<span class="nc" id="L180">                List.of(DEADLINES_KEY),</span>
+<span class="nc" id="L181">                deadlineMember(lease),</span>
+<span class="nc" id="L182">                Long.toString(Math.max(1, claimSeconds)));</span>
+<span class="nc bnc" id="L183" title="All 4 branches missed.">        return claimed != null &amp;&amp; claimed &gt; 0 ? new PublisherExpiryClaim(lease, claimed) : null;</span>
+    }
+
+    private String deadlineMember(PublisherLease lease) {
+<span class="nc" id="L187">        return lease.shipperId() + &quot;:&quot; + lease.redisValue();</span>
+    }
+
+    private String generationKey(Long shipperId) {
+<span class="nc" id="L191">        return GENERATION_PREFIX + shipperId;</span>
+    }
+
+    private String activeKey(Long shipperId) {
+<span class="nc" id="L195">        return ACTIVE_PREFIX + shipperId;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

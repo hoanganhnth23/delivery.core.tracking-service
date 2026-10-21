@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LocationMessageDispatcher.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.websocket</a> &gt; <span class="el_source">LocationMessageDispatcher.java</span></div><h1>LocationMessageDispatcher.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.websocket;
+
+import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketSession;
+
+import java.util.ArrayDeque;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
+
+/**
+ * Bounded asynchronous fan-out. For each session/delivery it coalesces updates
+ * with the same online state while retaining the latest state transition and
+ * latest location. Slow clients therefore cannot block the publisher thread or
+ * grow an unbounded queue.
+ */
+@Component
+public class LocationMessageDispatcher {
+
+    private final Executor executor;
+    private final ThreadPoolExecutor ownedExecutor;
+<span class="nc" id="L31">    private final Map&lt;String, PendingSession&gt; pending = new ConcurrentHashMap&lt;&gt;();</span>
+<span class="nc" id="L32">    private final LongAdder offered = new LongAdder();</span>
+<span class="nc" id="L33">    private final LongAdder sent = new LongAdder();</span>
+<span class="nc" id="L34">    private final LongAdder coalesced = new LongAdder();</span>
+<span class="nc" id="L35">    private final LongAdder failed = new LongAdder();</span>
+
+    @Autowired
+    public LocationMessageDispatcher(
+            @Value(&quot;${app.websocket.fanout.workers:4}&quot;) int workers,
+<span class="nc" id="L40">            @Value(&quot;${app.websocket.fanout.executor-queue-capacity:1024}&quot;) int queueCapacity) {</span>
+<span class="nc" id="L41">        int boundedWorkers = Math.max(1, Math.min(workers, 32));</span>
+<span class="nc" id="L42">        int boundedQueue = Math.max(64, Math.min(queueCapacity, 100_000));</span>
+<span class="nc" id="L43">        this.ownedExecutor = new ThreadPoolExecutor(</span>
+                boundedWorkers, boundedWorkers, 30, TimeUnit.SECONDS,
+                new ArrayBlockingQueue&lt;&gt;(boundedQueue),
+                runnable -&gt; {
+<span class="nc" id="L47">                    Thread thread = new Thread(runnable, &quot;tracking-location-fanout&quot;);</span>
+<span class="nc" id="L48">                    thread.setDaemon(true);</span>
+<span class="nc" id="L49">                    return thread;</span>
+                },
+                new ThreadPoolExecutor.AbortPolicy());
+<span class="nc" id="L52">        this.executor = ownedExecutor;</span>
+<span class="nc" id="L53">    }</span>
+
+<span class="nc" id="L55">    LocationMessageDispatcher(Executor executor) {</span>
+<span class="nc" id="L56">        this.executor = executor;</span>
+<span class="nc" id="L57">        this.ownedExecutor = null;</span>
+<span class="nc" id="L58">    }</span>
+
+    public void dispatch(WebSocketSession session, long deliveryId,
+                         TextMessage message, boolean online, java.util.function.BooleanSupplier eligible) {
+<span class="nc" id="L62">        java.util.Objects.requireNonNull(eligible, &quot;eligible&quot;);</span>
+<span class="nc" id="L63">        offered.increment();</span>
+<span class="nc" id="L64">        PendingSession sessionQueue = pending.computeIfAbsent(</span>
+<span class="nc" id="L65">                session.getId(), ignored -&gt; new PendingSession());</span>
+        boolean schedule;
+<span class="nc" id="L67">        synchronized (sessionQueue) {</span>
+<span class="nc" id="L68">            ArrayDeque&lt;PendingMessage&gt; roomQueue = sessionQueue.byDelivery</span>
+<span class="nc" id="L69">                    .computeIfAbsent(deliveryId, ignored -&gt; new ArrayDeque&lt;&gt;(2));</span>
+<span class="nc" id="L70">            PendingMessage last = roomQueue.peekLast();</span>
+<span class="nc bnc" id="L71" title="All 4 branches missed.">            if (last != null &amp;&amp; last.online() == online) {</span>
+<span class="nc" id="L72">                roomQueue.removeLast();</span>
+<span class="nc" id="L73">                coalesced.increment();</span>
+            }
+<span class="nc" id="L75">            roomQueue.addLast(new PendingMessage(message, online, eligible));</span>
+<span class="nc bnc" id="L76" title="All 2 branches missed.">            while (roomQueue.size() &gt; 2) {</span>
+<span class="nc" id="L77">                roomQueue.removeFirst();</span>
+<span class="nc" id="L78">                coalesced.increment();</span>
+            }
+<span class="nc bnc" id="L80" title="All 2 branches missed.">            schedule = !sessionQueue.draining;</span>
+<span class="nc bnc" id="L81" title="All 2 branches missed.">            if (schedule) sessionQueue.draining = true;</span>
+<span class="nc" id="L82">        }</span>
+<span class="nc bnc" id="L83" title="All 2 branches missed.">        if (schedule) schedule(session, sessionQueue);</span>
+<span class="nc" id="L84">    }</span>
+
+    public void sendControl(WebSocketSession session, TextMessage message) throws Exception {
+<span class="nc" id="L87">        synchronized (session) {</span>
+<span class="nc" id="L88">            session.sendMessage(message);</span>
+<span class="nc" id="L89">        }</span>
+<span class="nc" id="L90">    }</span>
+
+    public void remove(String sessionId) {
+<span class="nc" id="L93">        pending.remove(sessionId);</span>
+<span class="nc" id="L94">    }</span>
+
+    public Stats stats() {
+<span class="nc" id="L97">        return new Stats(offered.sum(), sent.sum(), coalesced.sum(), failed.sum());</span>
+    }
+
+    private void schedule(WebSocketSession session, PendingSession sessionQueue) {
+        try {
+<span class="nc" id="L102">            executor.execute(() -&gt; drain(session, sessionQueue));</span>
+<span class="nc" id="L103">        } catch (RuntimeException rejected) {</span>
+<span class="nc" id="L104">            synchronized (sessionQueue) {</span>
+<span class="nc" id="L105">                sessionQueue.draining = false;</span>
+<span class="nc" id="L106">            }</span>
+<span class="nc" id="L107">            failed.increment();</span>
+<span class="nc" id="L108">        }</span>
+<span class="nc" id="L109">    }</span>
+
+    private void drain(WebSocketSession session, PendingSession sessionQueue) {
+<span class="nc bnc" id="L112" title="All 2 branches missed.">        while (session.isOpen()) {</span>
+            PendingMessage next;
+<span class="nc" id="L114">            synchronized (sessionQueue) {</span>
+<span class="nc" id="L115">                next = poll(sessionQueue);</span>
+<span class="nc bnc" id="L116" title="All 2 branches missed.">                if (next == null) {</span>
+<span class="nc" id="L117">                    sessionQueue.draining = false;</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">                    if (sessionQueue.byDelivery.isEmpty()) pending.remove(session.getId(), sessionQueue);</span>
+<span class="nc" id="L119">                    return;</span>
+                }
+<span class="nc" id="L121">            }</span>
+            try {
+<span class="nc" id="L123">                synchronized (session) {</span>
+<span class="nc bnc" id="L124" title="All 2 branches missed.">                    if (next.eligible().getAsBoolean()) {</span>
+<span class="nc" id="L125">                        session.sendMessage(next.message());</span>
+<span class="nc" id="L126">                        sent.increment();</span>
+                    }
+<span class="nc" id="L128">                }</span>
+<span class="nc" id="L129">            } catch (Exception exception) {</span>
+<span class="nc" id="L130">                failed.increment();</span>
+<span class="nc" id="L131">                pending.remove(session.getId(), sessionQueue);</span>
+<span class="nc" id="L132">                return;</span>
+<span class="nc" id="L133">            }</span>
+<span class="nc" id="L134">        }</span>
+<span class="nc" id="L135">        pending.remove(session.getId(), sessionQueue);</span>
+<span class="nc" id="L136">    }</span>
+
+    private PendingMessage poll(PendingSession sessionQueue) {
+<span class="nc" id="L139">        var iterator = sessionQueue.byDelivery.entrySet().iterator();</span>
+<span class="nc bnc" id="L140" title="All 2 branches missed.">        while (iterator.hasNext()) {</span>
+<span class="nc" id="L141">            Map.Entry&lt;Long, ArrayDeque&lt;PendingMessage&gt;&gt; entry = iterator.next();</span>
+<span class="nc" id="L142">            PendingMessage message = entry.getValue().pollFirst();</span>
+<span class="nc bnc" id="L143" title="All 2 branches missed.">            if (entry.getValue().isEmpty()) iterator.remove();</span>
+<span class="nc bnc" id="L144" title="All 2 branches missed.">            if (message != null) return message;</span>
+<span class="nc" id="L145">        }</span>
+<span class="nc" id="L146">        return null;</span>
+    }
+
+    @PreDestroy
+    void shutdown() {
+<span class="nc bnc" id="L151" title="All 2 branches missed.">        if (ownedExecutor != null) ownedExecutor.shutdown();</span>
+<span class="nc" id="L152">    }</span>
+
+<span class="nc" id="L154">    private static final class PendingSession {</span>
+<span class="nc" id="L155">        private final Map&lt;Long, ArrayDeque&lt;PendingMessage&gt;&gt; byDelivery = new LinkedHashMap&lt;&gt;();</span>
+        private boolean draining;
+    }
+
+<span class="nc" id="L159">    private record PendingMessage(TextMessage message, boolean online, java.util.function.BooleanSupplier eligible) {}</span>
+
+<span class="nc" id="L161">    public record Stats(long offered, long sent, long coalesced, long failed) {}</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

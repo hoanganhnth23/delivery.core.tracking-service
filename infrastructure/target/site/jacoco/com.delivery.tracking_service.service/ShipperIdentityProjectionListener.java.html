@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ShipperIdentityProjectionListener.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.service</a> &gt; <span class="el_source">ShipperIdentityProjectionListener.java</span></div><h1>ShipperIdentityProjectionListener.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.service;
+
+import com.delivery.identity.contracts.ShipperIdentityUpserted;
+import com.delivery.tracking.application.api.ApplyShipperIdentityCommand;
+import com.delivery.tracking.application.api.ShipperIdentityInboxUseCase;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ShipperIdentityProjectionListener {
+    private final ObjectMapper mapper;
+    private final ShipperIdentityInboxUseCase inbox;
+<span class="nc" id="L17">    public ShipperIdentityProjectionListener(ObjectMapper mapper, ShipperIdentityInboxUseCase inbox) {</span>
+<span class="nc" id="L18">        this.mapper = mapper; this.inbox = inbox;</span>
+<span class="nc" id="L19">    }</span>
+    @RetryableTopic(
+            attempts = &quot;${app.shipper.identity.retry.attempts:4}&quot;,
+            backoff = @Backoff(delayExpression = &quot;${app.shipper.identity.retry.initial-delay-ms:1000}&quot;,
+                    multiplierExpression = &quot;${app.shipper.identity.retry.multiplier:2.0}&quot;,
+                    maxDelayExpression = &quot;${app.shipper.identity.retry.max-delay-ms:10000}&quot;),
+            exclude = IllegalArgumentException.class,
+            kafkaTemplate = &quot;trackingRetryKafkaTemplate&quot;,
+            autoCreateTopics = &quot;${app.shipper.identity.retry.auto-create-topics:false}&quot;,
+            retryTopicSuffix = &quot;-retry-tracking-shipper-identity&quot;,
+            dltTopicSuffix = &quot;.tracking-shipper-identity.DLT&quot;)
+    @KafkaListener(topics = &quot;${app.shipper.identity-topic:shipper.identity.upserted}&quot;,
+            groupId = &quot;${app.shipper.identity-consumer-group:tracking-shipper-identity-v1}&quot;)
+    public void upsert(String raw, Acknowledgment acknowledgment) throws Exception {
+<span class="nc" id="L33">        ShipperIdentityUpserted event = mapper.readValue(raw, ShipperIdentityUpserted.class);</span>
+<span class="nc" id="L34">        inbox.apply(new ApplyShipperIdentityCommand(event.eventId(), event.eventType(), event.principalId(),</span>
+<span class="nc" id="L35">                event.legacyUserId(), event.shipperId(), event.mappingVersion(), raw));</span>
+<span class="nc" id="L36">        acknowledgment.acknowledge();</span>
+<span class="nc" id="L37">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

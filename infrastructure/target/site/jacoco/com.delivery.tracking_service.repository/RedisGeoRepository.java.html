@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RedisGeoRepository.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.repository</a> &gt; <span class="el_source">RedisGeoRepository.java</span></div><h1>RedisGeoRepository.java</h1><pre class="source lang-java linenums">
+package com.delivery.tracking_service.repository;
+import org.springframework.stereotype.Repository;
+
+import com.delivery.tracking_service.common.constants.RedisConstants;
+import com.delivery.tracking_service.dto.response.ShipperLocationResponse;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import com.delivery.tracking.domain.PublisherExpiryClaim;
+import com.delivery.tracking.domain.PublisherLease;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Optional;
+
+
+@Repository
+@RequiredArgsConstructor
+<span class="nc" id="L21">@Slf4j</span>
+public class RedisGeoRepository implements ShipperLocationRepository {
+    private final RedisTemplate&lt;String, Object&gt; redisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
+    private static final String GEO_KEY = &quot;shippers:geo:locations&quot;;
+    private static final String ONLINE_SHIPPERS_SET = &quot;shippers:online:set&quot;;
+    // Compare the absolute metadata in the same value/transaction as the projection writes.
+    private static final String PROJECTION_ORDER = &quot;&quot;&quot;
+            local function projectionIsNewer(key, incoming)
+              local raw = redis.call('GET', key)
+              if not raw then return true end
+              local current = cjson.decode(raw)
+              if type(current) ~= 'table' then error('Invalid shipper location projection') end
+              -- A recognized legacy DTO has no absolute metadata; the new writer replaces it.
+              if current['@class'] == 'com.delivery.tracking_service.dto.response.ShipperLocationResponse' then
+                return true
+              end
+              local timestamp = current.occurredAt
+              if current['@class'] ~= 'com.delivery.tracking_service.repository.StoredShipperLocation'
+                  or type(timestamp) ~= 'number' or timestamp &lt;= 0 or timestamp ~= math.floor(timestamp) then
+                error('Invalid shipper location ordering metadata')
+              end
+              return incoming &gt; timestamp
+            end
+            &quot;&quot;&quot;;
+<span class="nc" id="L46">    private static final DefaultRedisScript&lt;Long&gt; CACHE_IF_CURRENT = new DefaultRedisScript&lt;&gt;(PROJECTION_ORDER + &quot;&quot;&quot;</span>
+            if ARGV[9] == '1' and (redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('GET', KEYS[2]) ~= ARGV[2]) then
+              return 0
+            end
+            local geoType = redis.call('TYPE', KEYS[4]).ok
+            local onlineType = redis.call('TYPE', KEYS[5]).ok
+            if (geoType ~= 'none' and geoType ~= 'zset') or (onlineType ~= 'none' and onlineType ~= 'set') then
+              return redis.error_reply('Invalid shipper membership type')
+            end
+            if not projectionIsNewer(KEYS[3], tonumber(ARGV[11])) then return 2 end
+            if ARGV[5] == '1' then
+              -- GEO validates Redis latitude limits before any projection is changed.
+              if ARGV[10] == '1' then
+                redis.call('GEOADD', KEYS[4], ARGV[6], ARGV[7], ARGV[4])
+                redis.call('EXPIRE', KEYS[4], ARGV[8])
+              end
+              redis.call('SADD', KEYS[5], ARGV[4])
+              redis.call('EXPIRE', KEYS[5], ARGV[8])
+            else
+              redis.call('ZREM', KEYS[4], ARGV[4])
+              redis.call('SREM', KEYS[5], ARGV[4])
+            end
+            redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[8])
+            return 1
+            &quot;&quot;&quot;, Long.class);
+
+    @Override
+    public boolean cacheIfCurrentPublisher(PublisherLease lease, ShipperLocationResponse location, long occurredAt) {
+<span class="nc" id="L74">        return writeLocation(lease.shipperId(), location, occurredAt, lease);</span>
+    }
+
+    private boolean writeLocation(Long shipperId, ShipperLocationResponse location, long occurredAt, PublisherLease lease) {
+<span class="nc" id="L78">        String id = shipperId.toString();</span>
+<span class="nc" id="L79">        Long result = stringRedisTemplate.execute(CACHE_IF_CURRENT, List.of(</span>
+                ShipperPublisherLeaseRepository.GENERATION_PREFIX + id,
+                ShipperPublisherLeaseRepository.ACTIVE_PREFIX + id,
+                RedisConstants.SHIPPER_LOCATION_KEY_PREFIX + id, GEO_KEY, ONLINE_SHIPPERS_SET),
+<span class="nc bnc" id="L83" title="All 4 branches missed.">                lease == null ? &quot;0&quot; : Long.toString(lease.generation()), lease == null ? &quot;&quot; : lease.redisValue(),</span>
+<span class="nc" id="L84">                serialized(new StoredShipperLocation(location, occurredAt)), serialized(id),</span>
+<span class="nc bnc" id="L85" title="All 4 branches missed.">                location != null &amp;&amp; Boolean.TRUE.equals(location.getIsOnline()) ? &quot;1&quot; : &quot;0&quot;,</span>
+<span class="nc bnc" id="L86" title="All 2 branches missed.">                location == null ? &quot;&quot; : String.valueOf(location.getLongitude()),</span>
+<span class="nc bnc" id="L87" title="All 2 branches missed.">                location == null ? &quot;&quot; : String.valueOf(location.getLatitude()),</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">                Long.toString(RedisConstants.SHIPPER_LOCATION_TTL), lease == null ? &quot;0&quot; : &quot;1&quot;,</span>
+<span class="nc bnc" id="L89" title="All 6 branches missed.">                location != null &amp;&amp; location.getLongitude() != null &amp;&amp; location.getLatitude() != null ? &quot;1&quot; : &quot;0&quot;, Long.toString(occurredAt));</span>
+        // 2 is an admitted stale fact: projection no-op, preserving ACK/publication contracts.
+<span class="nc bnc" id="L91" title="All 4 branches missed.">        return Long.valueOf(1).equals(result) || Long.valueOf(2).equals(result);</span>
+    }
+<span class="nc" id="L93">    private static final DefaultRedisScript&lt;Long&gt; OFFLINE_IF_EXPIRED = new DefaultRedisScript&lt;&gt;(PROJECTION_ORDER + &quot;&quot;&quot;</span>
+            if redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('EXISTS', KEYS[2]) == 1 then
+              return 0
+            end
+            local score = redis.call('ZSCORE', KEYS[3], ARGV[2])
+            local now = redis.call('TIME')
+            if not score or tonumber(score) ~= tonumber(ARGV[3])
+                or tonumber(score) &lt;= tonumber(now[1]) * 1000 + tonumber(now[2]) / 1000 then
+              return 0
+            end
+            -- Redis does not roll back earlier Lua writes after a command error.
+            -- Validate membership types before changing any of the three projections.
+            local geoType = redis.call('TYPE', KEYS[5]).ok
+            local onlineType = redis.call('TYPE', KEYS[6]).ok
+            if (geoType ~= 'none' and geoType ~= 'zset') or (onlineType ~= 'none' and onlineType ~= 'set') then
+              return redis.error_reply('Invalid shipper membership type')
+            end
+            if not projectionIsNewer(KEYS[4], tonumber(ARGV[7])) then return 2 end
+            redis.call('ZREM', KEYS[5], ARGV[5])
+            redis.call('SREM', KEYS[6], ARGV[5])
+            redis.call('SET', KEYS[4], ARGV[4], 'EX', ARGV[6])
+            return 1
+            &quot;&quot;&quot;, Long.class);
+
+    @Override
+    public boolean applyOfflineIfExpired(PublisherExpiryClaim claim, Optional&lt;ShipperLocationResponse&gt; cachedOffline, long occurredAt) {
+<span class="nc" id="L119">        var lease = claim.lease();</span>
+<span class="nc" id="L120">        String id = Long.toString(lease.shipperId());</span>
+        // The normal cache/GEO/set API uses GenericJackson serialization; Lua uses raw UTF-8.
+<span class="nc" id="L122">        String payload = serialized(new StoredShipperLocation(cachedOffline.orElse(null), occurredAt));</span>
+<span class="nc" id="L123">        Long result = stringRedisTemplate.execute(OFFLINE_IF_EXPIRED, List.of(</span>
+                ShipperPublisherLeaseRepository.GENERATION_PREFIX + id,
+                ShipperPublisherLeaseRepository.ACTIVE_PREFIX + id,
+                ShipperPublisherLeaseRepository.DEADLINES_KEY,
+                RedisConstants.SHIPPER_LOCATION_KEY_PREFIX + id, GEO_KEY, ONLINE_SHIPPERS_SET),
+<span class="nc" id="L128">                Long.toString(lease.generation()), id + &quot;:&quot; + lease.redisValue(),</span>
+<span class="nc" id="L129">                Long.toString(claim.claimUntilEpochMillis()),</span>
+<span class="nc" id="L130">                payload, serialized(id), Long.toString(RedisConstants.SHIPPER_LOCATION_TTL), Long.toString(occurredAt));</span>
+        // 2 is an admitted stale fact: projection no-op, preserving ACK/publication contracts.
+<span class="nc bnc" id="L132" title="All 4 branches missed.">        return Long.valueOf(1).equals(result) || Long.valueOf(2).equals(result);</span>
+    }
+
+    @SuppressWarnings(&quot;unchecked&quot;)
+    private String serialized(Object value) {
+<span class="nc" id="L137">        var serializer = (org.springframework.data.redis.serializer.RedisSerializer&lt;Object&gt;) redisTemplate.getValueSerializer();</span>
+<span class="nc" id="L138">        return new String(serializer.serialize(value), StandardCharsets.UTF_8);</span>
+    }
+
+    @Override
+    public void cacheShipperLocation(Long shipperId, ShipperLocationResponse location, long occurredAt) {
+        try {
+<span class="nc bnc" id="L144" title="All 2 branches missed.">            if (!writeLocation(shipperId, location, occurredAt, null)) throw new IllegalStateException(&quot;Redis did not store location&quot;);</span>
+<span class="nc" id="L145">        } catch (Exception failure) {</span>
+<span class="nc" id="L146">            throw new IllegalStateException(&quot;Cannot persist shipper location in Redis&quot;, failure);</span>
+<span class="nc" id="L147">        }</span>
+<span class="nc" id="L148">    }</span>
+
+    @Override
+    public ShipperLocationResponse getCachedShipperLocation(Long shipperId) {
+<span class="nc" id="L152">        Object cached = readCache(shipperId);</span>
+<span class="nc bnc" id="L153" title="All 2 branches missed.">        if (cached instanceof StoredShipperLocation projection) return projection.location();</span>
+        // Retain legacy coordinates for an explicit offline transition; never invent ordering metadata.
+<span class="nc bnc" id="L155" title="All 2 branches missed.">        return cached instanceof ShipperLocationResponse row ? row : null;</span>
+    }
+
+    public StoredShipperLocation getCachedProjection(Long shipperId) {
+<span class="nc" id="L159">        Object cached = readCache(shipperId);</span>
+<span class="nc bnc" id="L160" title="All 2 branches missed.">        if (cached == null) return null;</span>
+<span class="nc bnc" id="L161" title="All 2 branches missed.">        if (cached instanceof StoredShipperLocation projection) return projection;</span>
+<span class="nc" id="L162">        throw new IllegalStateException(&quot;Cached location has no absolute ordering metadata&quot;);</span>
+    }
+
+    private Object readCache(Long shipperId) {
+<span class="nc" id="L166">        try { return redisTemplate.opsForValue().get(RedisConstants.SHIPPER_LOCATION_KEY_PREFIX + shipperId); }</span>
+<span class="nc" id="L167">        catch (Exception failure) { throw new IllegalStateException(&quot;Cannot read shipper location from Redis&quot;, failure); }</span>
+    }
+
+    @Override
+    public void removeShipperLocationCache(Long shipperId, long occurredAt) {
+        // Coordinate-free offline retains a timestamp marker so a new subscription rejects old packets.
+<span class="nc" id="L173">        cacheShipperLocation(shipperId, null, occurredAt);</span>
+<span class="nc" id="L174">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

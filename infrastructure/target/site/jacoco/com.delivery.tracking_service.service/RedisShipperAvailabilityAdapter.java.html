@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RedisShipperAvailabilityAdapter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.service</a> &gt; <span class="el_source">RedisShipperAvailabilityAdapter.java</span></div><h1>RedisShipperAvailabilityAdapter.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.service;
+
+import com.delivery.tracking.application.api.*;
+import com.delivery.tracking.domain.PublisherExpiryClaim;
+import com.delivery.tracking_service.dto.response.ShipperLocationResponse;
+import com.delivery.tracking_service.repository.ShipperLocationRepository;
+import java.util.Optional;
+import org.springframework.stereotype.Component;
+
+/** Redis/Kafka/fanout representation mapping; the core owns offline decisions and ordering. */
+@Component
+public class RedisShipperAvailabilityAdapter implements ShipperAvailabilityStorePort, ShipperAvailabilityEventPort {
+    private final ShipperLocationRepository locations;
+    private final ShipperLocationEventPublisher events;
+    private final LocationFanoutPublisher fanout;
+
+    public RedisShipperAvailabilityAdapter(ShipperLocationRepository locations, ShipperLocationEventPublisher events,
+<span class="nc" id="L18">            LocationFanoutPublisher fanout) {</span>
+<span class="nc" id="L19">        this.locations = locations; this.events = events; this.fanout = fanout;</span>
+<span class="nc" id="L20">    }</span>
+    @Override public Optional&lt;CachedShipperLocation&gt; findCached(Long shipperId) {
+<span class="nc" id="L22">        return Optional.ofNullable(locations.getCachedShipperLocation(shipperId)).map(row -&gt;</span>
+<span class="nc" id="L23">                new CachedShipperLocation(row.getShipperId(), row.getLatitude(), row.getLongitude(),</span>
+<span class="nc" id="L24">                        row.getAccuracy(), row.getSpeed(), row.getHeading(), row.getDistance()));</span>
+    }
+    @Override public void saveOffline(Long shipperId, OfflineShipperLocation location) {
+<span class="nc" id="L27">        locations.cacheShipperLocation(shipperId, toResponse(location), location.timestamp().toEpochMilli());</span>
+<span class="nc" id="L28">    }</span>
+<span class="nc" id="L29">    @Override public void remove(Long shipperId, java.time.Instant occurredAt) { locations.removeShipperLocationCache(shipperId, occurredAt.toEpochMilli()); }</span>
+    @Override public boolean applyOfflineIfExpired(PublisherExpiryClaim claim, Optional&lt;OfflineShipperLocation&gt; cachedOffline, java.time.Instant occurredAt) {
+<span class="nc" id="L31">        return locations.applyOfflineIfExpired(claim, cachedOffline.map(RedisShipperAvailabilityAdapter::toResponse), occurredAt.toEpochMilli());</span>
+    }
+    @Override public void publish(OfflineShipperLocation location, String source) {
+<span class="nc" id="L34">        events.publishLocationUpdate(toResponse(location), source, location.timestamp().toEpochMilli());</span>
+<span class="nc" id="L35">    }</span>
+    @Override public void broadcast(OfflineShipperLocation location) {
+<span class="nc" id="L37">        fanout.publish(toResponse(location), location.timestamp().toEpochMilli());</span>
+<span class="nc" id="L38">    }</span>
+    public static ShipperLocationResponse toResponse(OfflineShipperLocation location) {
+<span class="nc" id="L40">        var facts = location.facts(); var response = new ShipperLocationResponse();</span>
+<span class="nc" id="L41">        response.setShipperId(facts.shipperId()); response.setLatitude(facts.latitude()); response.setLongitude(facts.longitude());</span>
+<span class="nc" id="L42">        response.setAccuracy(facts.accuracy()); response.setSpeed(facts.speed()); response.setHeading(facts.heading()); response.setDistance(facts.distance());</span>
+<span class="nc" id="L43">        var timestamp = java.time.LocalDateTime.ofInstant(location.timestamp(), java.time.ZoneId.systemDefault()).toString();</span>
+<span class="nc" id="L44">        response.setIsOnline(false); response.setLastPing(timestamp); response.setUpdatedAt(timestamp);</span>
+<span class="nc" id="L45">        return response;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

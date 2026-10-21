@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ShipperIdentityResolver.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.service</a> &gt; <span class="el_source">ShipperIdentityResolver.java</span></div><h1>ShipperIdentityResolver.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.service;
+
+import com.delivery.tracking.application.api.ShipperIdentityUseCase;
+import com.delivery.tracking.domain.TrackingAccessDeniedException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+
+/** Maps core identity results/denials to transport security and rollout metrics. */
+@Service
+public class ShipperIdentityResolver {
+    private final ShipperIdentityUseCase identities;
+    private final boolean enforced;
+    private final Counter preEnforcementFallback;
+    public ShipperIdentityResolver(ShipperIdentityUseCase identities,
+            @Value(&quot;${app.shipper.identity-projection.enforced:false}&quot;) boolean enforced,
+<span class="nc" id="L19">            MeterRegistry meterRegistry) {</span>
+<span class="nc" id="L20">        this.identities = identities; this.enforced = enforced;</span>
+<span class="nc" id="L21">        this.preEnforcementFallback = Counter.builder(&quot;delivery.identity.legacy.fallback&quot;)</span>
+<span class="nc" id="L22">                .tag(&quot;service&quot;, &quot;tracking&quot;).tag(&quot;surface&quot;, &quot;shipper_mapping_pre_enforcement&quot;)</span>
+<span class="nc" id="L23">                .register(meterRegistry);</span>
+<span class="nc" id="L24">    }</span>
+    public Long requireShipperId(Long principalId, Long legacyUserId) {
+        try {
+<span class="nc" id="L27">            var resolution = identities.resolve(principalId, legacyUserId, enforced);</span>
+<span class="nc bnc" id="L28" title="All 2 branches missed.">            if (resolution.usedLegacyFallback()) preEnforcementFallback.increment();</span>
+<span class="nc" id="L29">            return resolution.shipperId();</span>
+<span class="nc" id="L30">        } catch (TrackingAccessDeniedException denied) {</span>
+<span class="nc" id="L31">            throw new AccessDeniedException(denied.getMessage(), denied);</span>
+        }
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>V6__shipper_identity_projection.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">db.migration</a> &gt; <span class="el_source">V6__shipper_identity_projection.java</span></div><h1>V6__shipper_identity_projection.java</h1><pre class="source lang-java linenums">package db.migration;
+
+import java.sql.Connection;
+import java.sql.Statement;
+import org.flywaydb.core.api.migration.BaseJavaMigration;
+import org.flywaydb.core.api.migration.Context;
+
+<span class="fc" id="L8">public class V6__shipper_identity_projection extends BaseJavaMigration {</span>
+<span class="fc" id="L9">    @Override public void migrate(Context context) throws Exception { Connection connection = context.getConnection();</span>
+<span class="fc" id="L10">        execute(connection, &quot;CREATE TABLE IF NOT EXISTS shipper_identity_projection (principal_id BIGINT PRIMARY KEY,legacy_user_id BIGINT NOT NULL UNIQUE,shipper_id BIGINT NOT NULL UNIQUE,mapping_version BIGINT NOT NULL,updated_at TIMESTAMP NOT NULL)&quot;);</span>
+<span class="fc" id="L11">        execute(connection, &quot;CREATE TABLE IF NOT EXISTS shipper_identity_inbox_receipts (event_id UUID PRIMARY KEY,event_type VARCHAR(128) NOT NULL,principal_id BIGINT NOT NULL,payload_fingerprint VARCHAR(64) NOT NULL,processed_at TIMESTAMP NOT NULL)&quot;); }</span>
+<span class="fc" id="L12">    private void execute(Connection connection, String sql) throws Exception { try (Statement statement = connection.createStatement()) { statement.execute(sql); } }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

@@ -1,0 +1,4 @@
+com/delivery/tracking/domain/TrackingValueObjectsTest.class
+com/delivery/tracking/domain/LocationPublicationPolicyTest.class
+com/delivery/tracking/domain/LocationDeliveryOrderTest.class
+com/delivery/tracking/domain/LocationHistoryPolicyTest.class

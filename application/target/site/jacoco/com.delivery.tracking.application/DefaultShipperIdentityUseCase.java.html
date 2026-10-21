@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DefaultShipperIdentityUseCase.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-application</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking.application</a> &gt; <span class="el_source">DefaultShipperIdentityUseCase.java</span></div><h1>DefaultShipperIdentityUseCase.java</h1><pre class="source lang-java linenums">package com.delivery.tracking.application;
+
+import com.delivery.tracking.application.api.ShipperIdentityReadPort;
+import com.delivery.tracking.application.api.ShipperIdentityResolution;
+import com.delivery.tracking.application.api.ShipperIdentityUseCase;
+import com.delivery.tracking.domain.TrackingAccessDeniedException;
+import java.util.Objects;
+
+/** Derives shipper identity from the local projection and the existing rollout gate. */
+public final class DefaultShipperIdentityUseCase implements ShipperIdentityUseCase {
+    private final ShipperIdentityReadPort identities;
+
+<span class="fc" id="L13">    public DefaultShipperIdentityUseCase(ShipperIdentityReadPort identities) {</span>
+<span class="fc" id="L14">        this.identities = Objects.requireNonNull(identities, &quot;identities&quot;);</span>
+<span class="fc" id="L15">    }</span>
+
+    @Override
+    public ShipperIdentityResolution resolve(Long principalId, Long legacyUserId, boolean enforced) {
+<span class="fc bfc" id="L19" title="All 8 branches covered.">        if (principalId == null || principalId &lt;= 0 || legacyUserId == null || legacyUserId &lt;= 0) {</span>
+<span class="fc" id="L20">            throw new TrackingAccessDeniedException(&quot;Missing authenticated shipper identity&quot;);</span>
+        }
+<span class="fc" id="L22">        var mapping = identities.findByPrincipalId(principalId);</span>
+<span class="fc bfc" id="L23" title="All 2 branches covered.">        if (mapping.isPresent()) {</span>
+<span class="fc bfc" id="L24" title="All 2 branches covered.">            if (!legacyUserId.equals(mapping.get().legacyUserId())) {</span>
+<span class="fc" id="L25">                throw new TrackingAccessDeniedException(&quot;Shipper identity projection is divergent&quot;);</span>
+            }
+<span class="fc" id="L27">            return new ShipperIdentityResolution(mapping.get().shipperId(), false);</span>
+        }
+<span class="fc bfc" id="L29" title="All 2 branches covered.">        if (!enforced) {</span>
+<span class="fc" id="L30">            return new ShipperIdentityResolution(legacyUserId, true);</span>
+        }
+<span class="fc" id="L32">        throw new TrackingAccessDeniedException(&quot;Shipper identity projection is not ready&quot;);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

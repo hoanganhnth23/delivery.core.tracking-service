@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DefaultTrackingService.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-application</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking.application</a> &gt; <span class="el_source">DefaultTrackingService.java</span></div><h1>DefaultTrackingService.java</h1><pre class="source lang-java linenums">package com.delivery.tracking.application;
+
+import com.delivery.tracking.application.api.LocationEventPort;
+import com.delivery.tracking.domain.LocationUpdateSource;
+import com.delivery.tracking.application.api.LocationStorePort;
+import com.delivery.tracking.application.api.TrackingPort;
+import com.delivery.tracking.application.api.UpdateLocationCommand;
+import com.delivery.tracking.domain.LocationSnapshot;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.Objects;
+import java.util.Optional;
+import com.delivery.tracking.domain.PublisherLease;
+
+/** Framework-free tracking use cases; transport and persistence stay behind ports. */
+public final class DefaultTrackingService implements TrackingPort {
+    private final LocationStorePort store;
+    private final LocationEventPort events;
+    private final Clock clock;
+
+    public DefaultTrackingService(LocationStorePort store, LocationEventPort events) {
+<span class="nc" id="L22">        this(store, events, Clock.systemUTC());</span>
+<span class="nc" id="L23">    }</span>
+
+    /** Creates a framework-free service with an explicit time source. */
+<span class="fc" id="L26">    public DefaultTrackingService(LocationStorePort store, LocationEventPort events, Clock clock) {</span>
+<span class="fc" id="L27">        this.store = Objects.requireNonNull(store, &quot;store&quot;);</span>
+<span class="fc" id="L28">        this.events = Objects.requireNonNull(events, &quot;events&quot;);</span>
+<span class="fc" id="L29">        this.clock = Objects.requireNonNull(clock, &quot;clock&quot;);</span>
+<span class="fc" id="L30">    }</span>
+
+    @Override
+    public LocationSnapshot updateLocation(UpdateLocationCommand command) {
+<span class="fc" id="L34">        Objects.requireNonNull(command, &quot;command&quot;);</span>
+<span class="fc" id="L35">        var source = Objects.requireNonNull(command.source(), &quot;source&quot;);</span>
+<span class="fc bfc" id="L36" title="All 2 branches covered.">        if (source != LocationUpdateSource.APPLICATION) throw new IllegalArgumentException(&quot;WebSocket updates require publisher lease&quot;);</span>
+<span class="fc" id="L37">        var snapshot = snapshot(command);</span>
+<span class="fc" id="L38">        store.save(snapshot, source);</span>
+<span class="fc" id="L39">        replicate(snapshot, source);</span>
+<span class="fc" id="L40">        return snapshot;</span>
+    }
+
+    @Override
+    public Optional&lt;LocationSnapshot&gt; updatePublisherLocation(UpdateLocationCommand command, PublisherLease lease) {
+<span class="fc" id="L45">        Objects.requireNonNull(command, &quot;command&quot;);</span>
+<span class="fc" id="L46">        Objects.requireNonNull(lease, &quot;lease&quot;);</span>
+<span class="fc bfc" id="L47" title="All 4 branches covered.">        if (command.source() != LocationUpdateSource.WEBSOCKET || command.shipperId() != lease.shipperId()) {</span>
+<span class="fc" id="L48">            throw new IllegalArgumentException(&quot;WebSocket command and publisher identity must match&quot;);</span>
+        }
+<span class="fc" id="L50">        var snapshot = snapshot(command);</span>
+<span class="fc bfc" id="L51" title="All 2 branches covered.">        if (!store.saveIfCurrentPublisher(snapshot, lease)) return Optional.empty();</span>
+<span class="fc" id="L52">        replicate(snapshot, LocationUpdateSource.WEBSOCKET);</span>
+<span class="fc" id="L53">        return Optional.of(snapshot);</span>
+    }
+
+    private LocationSnapshot snapshot(UpdateLocationCommand command) {
+<span class="fc" id="L57">        Instant now = Instant.now(clock);</span>
+<span class="fc" id="L58">        return new LocationSnapshot(command.shipperId(), command.coordinate(),</span>
+<span class="fc" id="L59">                command.accuracy(), command.speed(), command.heading(), command.online(), now, now);</span>
+    }
+
+    private void replicate(LocationSnapshot snapshot, LocationUpdateSource source) {
+<span class="fc bfc" id="L63" title="All 2 branches covered.">        if (!source.publishesBeforeFanout()) events.broadcast(snapshot, source);</span>
+<span class="fc" id="L64">        events.publish(snapshot, source);</span>
+<span class="fc bfc" id="L65" title="All 2 branches covered.">        if (source.publishesBeforeFanout()) events.broadcast(snapshot, source);</span>
+<span class="fc" id="L66">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

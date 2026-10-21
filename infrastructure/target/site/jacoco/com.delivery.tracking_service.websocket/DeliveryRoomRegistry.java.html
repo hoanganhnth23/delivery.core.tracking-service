@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DeliveryRoomRegistry.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.websocket</a> &gt; <span class="el_source">DeliveryRoomRegistry.java</span></div><h1>DeliveryRoomRegistry.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.websocket;
+
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+/** Local authorized membership index for legacy single and projected batch rooms. */
+@Component
+<span class="nc" id="L13">public class DeliveryRoomRegistry implements com.delivery.tracking.application.api.DeliveryRoomIndexPort {</span>
+
+<span class="nc" id="L15">    private final Object[] updateLocks = java.util.stream.IntStream.range(0, 256)</span>
+<span class="nc" id="L16">            .mapToObj(ignored -&gt; new Object()).toArray(Object[]::new);</span>
+<span class="nc" id="L17">    private final java.util.concurrent.atomic.AtomicLong membershipSequence = new java.util.concurrent.atomic.AtomicLong();</span>
+<span class="nc" id="L18">    private final Map&lt;Long, Room&gt; rooms = new ConcurrentHashMap&lt;&gt;();</span>
+<span class="nc" id="L19">    private final Map&lt;Long, Set&lt;Long&gt;&gt; activeDeliveriesByShipper = new ConcurrentHashMap&lt;&gt;();</span>
+<span class="nc" id="L20">    private final Map&lt;String, Set&lt;Long&gt;&gt; roomsBySession = new ConcurrentHashMap&lt;&gt;();</span>
+
+    public void withinUpdate(long shipperId, Runnable operation) {
+<span class="nc" id="L23">        synchronized (updateLocks[Math.floorMod(Long.hashCode(shipperId), updateLocks.length)]) { operation.run(); }</span>
+<span class="nc" id="L24">    }</span>
+
+    public synchronized void subscribe(long deliveryId, long shipperId, String sessionId) {
+<span class="nc" id="L27">        Room prior = rooms.get(deliveryId);</span>
+<span class="nc bnc" id="L28" title="All 4 branches missed.">        if (prior != null &amp;&amp; prior.shipperId() != shipperId) {</span>
+<span class="nc" id="L29">            removeRoom(deliveryId);</span>
+<span class="nc" id="L30">            var oldAssignments = new java.util.HashSet&lt;&gt;(activeDeliveries(prior.shipperId()));</span>
+<span class="nc" id="L31">            oldAssignments.remove(deliveryId);</span>
+<span class="nc bnc" id="L32" title="All 2 branches missed.">            if (oldAssignments.isEmpty()) activeDeliveriesByShipper.remove(prior.shipperId());</span>
+<span class="nc" id="L33">            else activeDeliveriesByShipper.put(prior.shipperId(), Set.copyOf(oldAssignments));</span>
+        }
+<span class="nc bnc" id="L35" title="All 2 branches missed.">        if (!activeDeliveries(shipperId).contains(deliveryId)) activate(deliveryId, shipperId);</span>
+<span class="nc" id="L36">        Room room = rooms.computeIfAbsent(deliveryId, ignored -&gt; new Room(shipperId));</span>
+<span class="nc" id="L37">        room.sessions().computeIfAbsent(sessionId, ignored -&gt; new Membership(membershipSequence.incrementAndGet(),</span>
+                new com.delivery.tracking.domain.LocationDeliveryOrder()));
+<span class="nc" id="L39">        roomsBySession.computeIfAbsent(sessionId, ignored -&gt; ConcurrentHashMap.newKeySet())</span>
+<span class="nc" id="L40">                .add(deliveryId);</span>
+<span class="nc" id="L41">    }</span>
+
+    public synchronized void activate(long deliveryId, long shipperId) {
+<span class="nc" id="L44">        synchronize(shipperId, Set.of(deliveryId));</span>
+<span class="nc" id="L45">    }</span>
+
+    public synchronized void synchronize(long shipperId, Set&lt;Long&gt; deliveryIds) {
+<span class="nc" id="L48">        Set&lt;Long&gt; incoming = Set.copyOf(deliveryIds);</span>
+<span class="nc" id="L49">        Set&lt;Long&gt; previous = activeDeliveriesByShipper.getOrDefault(shipperId, Set.of());</span>
+<span class="nc bnc" id="L50" title="All 2 branches missed.">        if (incoming.isEmpty()) activeDeliveriesByShipper.remove(shipperId);</span>
+<span class="nc" id="L51">        else activeDeliveriesByShipper.put(shipperId, incoming);</span>
+<span class="nc bnc" id="L52" title="All 4 branches missed.">        for (Long deliveryId : previous) if (!incoming.contains(deliveryId)) {</span>
+<span class="nc" id="L53">            Room room = rooms.get(deliveryId);</span>
+<span class="nc bnc" id="L54" title="All 4 branches missed.">            if (room != null &amp;&amp; room.shipperId() == shipperId) removeRoom(deliveryId);</span>
+        }
+<span class="nc" id="L56">    }</span>
+
+    public synchronized void end(long deliveryId, long shipperId) {
+<span class="nc" id="L59">        Set&lt;Long&gt; current = activeDeliveries(shipperId);</span>
+<span class="nc bnc" id="L60" title="All 2 branches missed.">        if (current.contains(deliveryId)) {</span>
+<span class="nc" id="L61">            var remaining = new java.util.HashSet&lt;&gt;(current); remaining.remove(deliveryId);</span>
+<span class="nc" id="L62">            synchronize(shipperId, remaining);</span>
+        }
+<span class="nc" id="L64">    }</span>
+
+    public synchronized void unsubscribe(String sessionId, long shipperId) {
+<span class="nc" id="L67">        Set&lt;Long&gt; sessionRooms = roomsBySession.get(sessionId);</span>
+<span class="nc bnc" id="L68" title="All 2 branches missed.">        if (sessionRooms == null) return;</span>
+<span class="nc bnc" id="L69" title="All 2 branches missed.">        for (Long deliveryId : new ArrayList&lt;&gt;(sessionRooms)) {</span>
+<span class="nc" id="L70">            Room room = rooms.get(deliveryId);</span>
+<span class="nc bnc" id="L71" title="All 4 branches missed.">            if (room != null &amp;&amp; room.shipperId() == shipperId) {</span>
+<span class="nc" id="L72">                removeMembership(deliveryId, sessionId);</span>
+            }
+<span class="nc" id="L74">        }</span>
+<span class="nc" id="L75">    }</span>
+
+    public synchronized void removeSession(String sessionId) {
+<span class="nc" id="L78">        Set&lt;Long&gt; sessionRooms = roomsBySession.remove(sessionId);</span>
+<span class="nc bnc" id="L79" title="All 2 branches missed.">        if (sessionRooms == null) return;</span>
+<span class="nc bnc" id="L80" title="All 2 branches missed.">        for (Long deliveryId : sessionRooms) {</span>
+<span class="nc" id="L81">            Room room = rooms.get(deliveryId);</span>
+<span class="nc bnc" id="L82" title="All 2 branches missed.">            if (room != null) {</span>
+<span class="nc" id="L83">                room.sessions().remove(sessionId);</span>
+<span class="nc bnc" id="L84" title="All 2 branches missed.">                if (room.sessions().isEmpty()</span>
+<span class="nc bnc" id="L85" title="All 2 branches missed.">                        &amp;&amp; !activeDeliveries(room.shipperId()).contains(deliveryId)) {</span>
+<span class="nc" id="L86">                    rooms.remove(deliveryId, room);</span>
+                }
+            }
+<span class="nc" id="L89">        }</span>
+<span class="nc" id="L90">    }</span>
+
+    public List&lt;String&gt; subscribersForShipper(long shipperId) {
+<span class="nc" id="L93">        var sessions = new java.util.HashSet&lt;String&gt;();</span>
+<span class="nc bnc" id="L94" title="All 2 branches missed.">        for (Long deliveryId : activeDeliveries(shipperId)) sessions.addAll(subscribers(deliveryId, shipperId));</span>
+<span class="nc" id="L95">        return List.copyOf(sessions);</span>
+    }
+
+    public List&lt;String&gt; subscribers(long deliveryId, long shipperId) {
+<span class="nc" id="L99">        Room room = rooms.get(deliveryId);</span>
+<span class="nc bnc" id="L100" title="All 4 branches missed.">        if (room == null || room.shipperId() != shipperId</span>
+<span class="nc bnc" id="L101" title="All 2 branches missed.">                || !activeDeliveries(shipperId).contains(deliveryId)) {</span>
+<span class="nc" id="L102">            return List.of();</span>
+        }
+<span class="nc" id="L104">        return List.copyOf(room.sessions().keySet());</span>
+    }
+
+    public Long membershipVersion(long deliveryId, long shipperId, String sessionId) {
+<span class="nc" id="L108">        Room room = rooms.get(deliveryId);</span>
+<span class="nc bnc" id="L109" title="All 6 branches missed.">        if (room == null || room.shipperId() != shipperId || !activeDeliveries(shipperId).contains(deliveryId)) return null;</span>
+<span class="nc" id="L110">        var member = room.sessions().get(sessionId);</span>
+<span class="nc bnc" id="L111" title="All 2 branches missed.">        return member == null ? null : member.version();</span>
+    }
+
+    public synchronized boolean admitLocation(long deliveryId, long shipperId, String sessionId, long membership, long occurredAt) {
+<span class="nc" id="L115">        Room room = rooms.get(deliveryId);</span>
+<span class="nc bnc" id="L116" title="All 6 branches missed.">        if (room == null || room.shipperId() != shipperId || !activeDeliveries(shipperId).contains(deliveryId)) return false;</span>
+<span class="nc" id="L117">        var member = room.sessions().get(sessionId);</span>
+<span class="nc bnc" id="L118" title="All 6 branches missed.">        return member != null &amp;&amp; member.version() == membership &amp;&amp; member.order().admit(occurredAt);</span>
+    }
+
+    public Long activeDelivery(long shipperId) {
+<span class="nc" id="L122">        return activeDeliveries(shipperId).stream().min(Long::compareTo).orElse(null);</span>
+    }
+
+    public Set&lt;Long&gt; activeDeliveries(long shipperId) {
+<span class="nc" id="L126">        return activeDeliveriesByShipper.getOrDefault(shipperId, Set.of());</span>
+    }
+
+    public int roomCount() {
+<span class="nc" id="L130">        return rooms.size();</span>
+    }
+
+    private void removeMembership(Long deliveryId, String sessionId) {
+<span class="nc" id="L134">        Room room = rooms.get(deliveryId);</span>
+<span class="nc bnc" id="L135" title="All 2 branches missed.">        if (room != null) room.sessions().remove(sessionId);</span>
+<span class="nc" id="L136">        Set&lt;Long&gt; sessionRooms = roomsBySession.get(sessionId);</span>
+<span class="nc bnc" id="L137" title="All 2 branches missed.">        if (sessionRooms != null) {</span>
+<span class="nc" id="L138">            sessionRooms.remove(deliveryId);</span>
+<span class="nc bnc" id="L139" title="All 2 branches missed.">            if (sessionRooms.isEmpty()) roomsBySession.remove(sessionId, sessionRooms);</span>
+        }
+<span class="nc" id="L141">    }</span>
+
+    private void removeRoom(Long deliveryId) {
+<span class="nc" id="L144">        Room removed = rooms.remove(deliveryId);</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">        if (removed == null) return;</span>
+<span class="nc bnc" id="L146" title="All 2 branches missed.">        for (String sessionId : removed.sessions().keySet()) {</span>
+<span class="nc" id="L147">            Set&lt;Long&gt; sessionRooms = roomsBySession.get(sessionId);</span>
+<span class="nc bnc" id="L148" title="All 2 branches missed.">            if (sessionRooms != null) {</span>
+<span class="nc" id="L149">                sessionRooms.remove(deliveryId);</span>
+<span class="nc bnc" id="L150" title="All 2 branches missed.">                if (sessionRooms.isEmpty()) roomsBySession.remove(sessionId, sessionRooms);</span>
+            }
+<span class="nc" id="L152">        }</span>
+<span class="nc" id="L153">    }</span>
+
+<span class="nc" id="L155">    private record Membership(long version, com.delivery.tracking.domain.LocationDeliveryOrder order) {}</span>
+
+<span class="nc" id="L157">    private record Room(long shipperId, Map&lt;String, Membership&gt; sessions) {</span>
+        private Room(long shipperId) {
+<span class="nc" id="L159">            this(shipperId, new ConcurrentHashMap&lt;&gt;());</span>
+<span class="nc" id="L160">        }</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

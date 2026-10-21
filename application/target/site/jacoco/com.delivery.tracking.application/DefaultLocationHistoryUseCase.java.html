@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DefaultLocationHistoryUseCase.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-application</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking.application</a> &gt; <span class="el_source">DefaultLocationHistoryUseCase.java</span></div><h1>DefaultLocationHistoryUseCase.java</h1><pre class="source lang-java linenums">package com.delivery.tracking.application;
+import com.delivery.tracking.application.api.*;
+import com.delivery.tracking.domain.LocationHistoryOutcome;
+import com.delivery.tracking.domain.LocationHistoryPolicy;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.*;
+import java.util.*;
+public final class DefaultLocationHistoryUseCase implements LocationHistoryUseCase {
+    private final LocationHistoryStorePort store;
+    private final LocationHistoryTransactionPort transactions;
+    private final Clock clock;
+    private final int maxQuerySize;
+    private final int retentionDays;
+    public DefaultLocationHistoryUseCase(LocationHistoryStorePort store, LocationHistoryTransactionPort transactions,
+            int maxQuerySize, int retentionDays) {
+<span class="nc" id="L19">        this(store, transactions, maxQuerySize, retentionDays, Clock.systemUTC());</span>
+<span class="nc" id="L20">    }</span>
+    public DefaultLocationHistoryUseCase(LocationHistoryStorePort store, LocationHistoryTransactionPort transactions,
+<span class="fc" id="L22">            int maxQuerySize, int retentionDays, Clock clock) {</span>
+<span class="fc" id="L23">        this.store = Objects.requireNonNull(store, &quot;store&quot;);</span>
+<span class="fc" id="L24">        this.transactions = Objects.requireNonNull(transactions, &quot;transactions&quot;);</span>
+<span class="fc" id="L25">        this.clock = Objects.requireNonNull(clock, &quot;clock&quot;);</span>
+<span class="fc" id="L26">        this.maxQuerySize = Math.max(1, Math.min(maxQuerySize, 500));</span>
+<span class="fc" id="L27">        this.retentionDays = Math.max(1, retentionDays);</span>
+<span class="fc" id="L28">    }</span>
+    @Override public LocationHistoryOutcome record(LocationHistoryCommand command) {
+<span class="fc" id="L30">        return transactions.required(() -&gt; recordInTransaction(command));</span>
+    }
+    private LocationHistoryOutcome recordInTransaction(LocationHistoryCommand event) {
+<span class="fc bfc" id="L33" title="All 2 branches covered.">        String rawPayload = event == null ? null : event.rawPayload();</span>
+<span class="fc" id="L34">        validateIdentity(event);</span>
+<span class="fc" id="L35">        requirePayload(rawPayload);</span>
+<span class="fc" id="L36">        Instant occurredAt = Instant.ofEpochMilli(event.timestamp());</span>
+<span class="fc" id="L37">        String fingerprint = fingerprint(rawPayload);</span>
+
+<span class="fc" id="L39">        LocationHistoryReceiptFacts existing = store.receipt(event.eventId()).orElse(null);</span>
+<span class="fc bfc" id="L40" title="All 2 branches covered.">        if (existing != null) {</span>
+<span class="fc" id="L41">            return exactReplay(existing, event, occurredAt, fingerprint);</span>
+        }
+<span class="fc bfc" id="L43" title="All 2 branches covered.">        if (store.claim(new LocationHistoryReceiptFacts(event.eventId(), event.deliveryId(), event.shipperId(),</span>
+                occurredAt, LocationHistoryOutcome.PENDING, fingerprint)) == 0) {
+<span class="fc" id="L45">            existing = store.receipt(event.eventId()).orElseThrow(() -&gt;</span>
+<span class="fc" id="L46">                    new IllegalStateException(&quot;location-history receipt conflict resolved without a committed row&quot;));</span>
+<span class="fc" id="L47">            return exactReplay(existing, event, occurredAt, fingerprint);</span>
+        }
+
+<span class="fc bfc" id="L50" title="All 2 branches covered.">        if (event.deliveryId() == null) {</span>
+<span class="fc" id="L51">            return complete(event.eventId(), LocationHistoryOutcome.NO_DELIVERY);</span>
+        }
+<span class="fc bfc" id="L53" title="All 2 branches covered.">        if (!Boolean.TRUE.equals(event.isOnline())) {</span>
+<span class="fc" id="L54">            return complete(event.eventId(), LocationHistoryOutcome.OFFLINE_TOMBSTONE);</span>
+        }
+<span class="fc" id="L56">        validateCoordinates(event);</span>
+
+<span class="fc" id="L58">        BigDecimal latitude = LocationHistoryPolicy.coordinate(event.latitude());</span>
+<span class="fc" id="L59">        BigDecimal longitude = LocationHistoryPolicy.coordinate(event.longitude());</span>
+<span class="fc" id="L60">        store.lockSampling(event.deliveryId(), event.shipperId());</span>
+<span class="fc" id="L61">        var previous = store.previous(</span>
+<span class="fc" id="L62">                        event.deliveryId(), event.shipperId(), occurredAt);</span>
+<span class="fc" id="L63">        var next = store.next(</span>
+<span class="fc" id="L64">                        event.deliveryId(), event.shipperId(), occurredAt);</span>
+
+<span class="fc" id="L66">        boolean keep = previous.map(point -&gt; LocationHistoryPolicy.separated(point.occurredAt(), point.latitude(), point.longitude(), occurredAt, latitude, longitude))</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">                .orElse(true)</span>
+<span class="fc" id="L68">                &amp;&amp; next.map(point -&gt; LocationHistoryPolicy.separated(point.occurredAt(), point.latitude(), point.longitude(), occurredAt, latitude, longitude))</span>
+<span class="fc bfc" id="L69" title="All 2 branches covered.">                .orElse(true);</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">        if (!keep) {</span>
+<span class="fc" id="L71">            return complete(event.eventId(), LocationHistoryOutcome.SAMPLED_OUT);</span>
+        }
+
+<span class="fc" id="L74">        store.save(new LocationHistoryPoint(</span>
+<span class="fc" id="L75">                event.eventId(), event.deliveryId(), event.shipperId(), occurredAt,</span>
+<span class="fc" id="L76">                latitude, longitude, LocationHistoryPolicy.telemetry(event.accuracy()), LocationHistoryPolicy.telemetry(event.speed()),</span>
+<span class="fc" id="L77">                LocationHistoryPolicy.telemetry(event.heading()), LocationHistoryPolicy.normalizedSource(event.source())));</span>
+<span class="fc" id="L78">        return complete(event.eventId(), LocationHistoryOutcome.PERSISTED);</span>
+    }
+
+    @Override public List&lt;LocationHistoryPoint&gt; byDelivery(long deliveryId, int requestedSize) {
+<span class="fc bfc" id="L82" title="All 2 branches covered.">        if (deliveryId &lt;= 0) throw new IllegalArgumentException(&quot;deliveryId must be positive&quot;);</span>
+<span class="fc" id="L83">        int size = Math.max(1, Math.min(requestedSize, maxQuerySize));</span>
+<span class="fc" id="L84">        return transactions.readOnly(() -&gt; store.byDelivery(deliveryId, size));</span>
+    }
+    @Override public LocationHistoryCleanupResult cleanup(Instant cutoff) {
+<span class="fc" id="L87">        return transactions.required(() -&gt; new LocationHistoryCleanupResult(</span>
+<span class="fc" id="L88">                store.deleteHistoryOlderThan(cutoff), store.deleteReceiptsOlderThan(cutoff)));</span>
+    }
+    @Override public LocationHistoryCleanupResult cleanupExpired() {
+<span class="fc" id="L91">        return cleanup(Instant.now(clock).minus(retentionDays, java.time.temporal.ChronoUnit.DAYS));</span>
+    }
+
+    private LocationHistoryOutcome complete(UUID eventId, LocationHistoryOutcome outcome) {
+<span class="fc bfc" id="L95" title="All 2 branches covered.">        if (store.complete(eventId, outcome) != 1) {</span>
+<span class="fc" id="L96">            throw new IllegalStateException(&quot;location-history receipt claim was not pending at completion&quot;);</span>
+        }
+<span class="fc" id="L98">        return outcome;</span>
+    }
+
+    private LocationHistoryOutcome exactReplay(LocationHistoryReceiptFacts existing,
+                                                        LocationHistoryCommand event,
+                                                        Instant occurredAt,
+                                                        String fingerprint) {
+<span class="fc bfc" id="L105" title="All 2 branches covered.">        if (!Objects.equals(existing.deliveryId(), event.deliveryId())</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">                || !Objects.equals(existing.shipperId(), event.shipperId())</span>
+<span class="fc bfc" id="L107" title="All 2 branches covered.">                || !Objects.equals(existing.occurredAt(), occurredAt)) {</span>
+<span class="fc" id="L108">            throw new IllegalArgumentException(&quot;location-history eventId replay has contradictory identity&quot;);</span>
+        }
+        // Pre-fingerprint receipts are retained for their bounded 90-day
+        // support-history window. They can prove immutable identity but cannot
+        // prove complete raw payload equality; all post-migration receipts are
+        // strict raw-payload fences.
+<span class="fc bfc" id="L114" title="All 2 branches covered.">        if (existing.payloadFingerprint() != null</span>
+<span class="pc bpc" id="L115" title="1 of 2 branches missed.">                &amp;&amp; !existing.payloadFingerprint().equals(fingerprint)) {</span>
+<span class="fc" id="L116">            throw new IllegalArgumentException(&quot;location-history eventId replay has contradictory payload&quot;);</span>
+        }
+<span class="fc bfc" id="L118" title="All 2 branches covered.">        if (existing.outcome() == LocationHistoryOutcome.PENDING) {</span>
+<span class="fc" id="L119">            throw new IllegalStateException(&quot;location-history receipt remained pending after commit&quot;);</span>
+        }
+<span class="fc" id="L121">        return existing.outcome();</span>
+    }
+
+    private void requirePayload(String rawPayload) {
+<span class="fc bfc" id="L125" title="All 4 branches covered.">        if (rawPayload == null || rawPayload.isBlank()) {</span>
+<span class="fc" id="L126">            throw new IllegalArgumentException(&quot;raw location payload is required&quot;);</span>
+        }
+<span class="fc" id="L128">    }</span>
+
+    private String fingerprint(String payload) {
+        try {
+<span class="fc" id="L132">            return HexFormat.of().formatHex(MessageDigest.getInstance(&quot;SHA-256&quot;)</span>
+<span class="fc" id="L133">                    .digest(payload.getBytes(StandardCharsets.UTF_8)));</span>
+<span class="nc" id="L134">        } catch (NoSuchAlgorithmException impossible) {</span>
+<span class="nc" id="L135">            throw new IllegalStateException(&quot;SHA-256 is unavailable&quot;, impossible);</span>
+        }
+    }
+
+    private void validateIdentity(LocationHistoryCommand event) {
+<span class="fc bfc" id="L140" title="All 6 branches covered.">        if (event == null || event.eventId() == null || event.shipperId() == null</span>
+<span class="fc bfc" id="L141" title="All 4 branches covered.">                || event.shipperId() &lt;= 0 || event.timestamp() &lt;= 0</span>
+<span class="fc bfc" id="L142" title="All 2 branches covered.">                || event.timestamp() &gt; clock.millis() + Duration.ofMinutes(5).toMillis()) {</span>
+<span class="fc" id="L143">            throw new IllegalArgumentException(&quot;Stable event identity, shipper and timestamp are required&quot;);</span>
+        }
+<span class="fc bfc" id="L145" title="All 4 branches covered.">        if (event.deliveryId() != null &amp;&amp; event.deliveryId() &lt;= 0) {</span>
+<span class="fc" id="L146">            throw new IllegalArgumentException(&quot;deliveryId must be positive when present&quot;);</span>
+        }
+<span class="fc" id="L148">    }</span>
+
+    private void validateCoordinates(LocationHistoryCommand event) {
+<span class="fc bfc" id="L151" title="All 4 branches covered.">        if (event.latitude() == null || !Double.isFinite(event.latitude())</span>
+<span class="fc bfc" id="L152" title="All 4 branches covered.">                || event.latitude() &lt; -90 || event.latitude() &gt; 90</span>
+<span class="fc bfc" id="L153" title="All 4 branches covered.">                || event.longitude() == null || !Double.isFinite(event.longitude())</span>
+<span class="fc bfc" id="L154" title="All 4 branches covered.">                || event.longitude() &lt; -180 || event.longitude() &gt; 180) {</span>
+<span class="fc" id="L155">            throw new IllegalArgumentException(&quot;Online history event requires valid coordinates&quot;);</span>
+        }
+<span class="fc" id="L157">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

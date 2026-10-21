@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>UpdateLocationRequest.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.dto.request</a> &gt; <span class="el_source">UpdateLocationRequest.java</span></div><h1>UpdateLocationRequest.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.dto.request;
+
+import lombok.Getter;
+import lombok.Setter;
+
+import jakarta.validation.constraints.NotNull;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+
+@Getter
+@Setter
+<span class="nc" id="L13">public class UpdateLocationRequest {</span>
+    
+    @NotNull(message = &quot;Latitude không được để trống&quot;)
+    @DecimalMin(value = &quot;-90.0&quot;, message = &quot;Latitude phải từ -90 đến 90&quot;)
+    @DecimalMax(value = &quot;90.0&quot;, message = &quot;Latitude phải từ -90 đến 90&quot;)
+    private Double latitude;
+    
+    @NotNull(message = &quot;Longitude không được để trống&quot;)
+    @DecimalMin(value = &quot;-180.0&quot;, message = &quot;Longitude phải từ -180 đến 180&quot;)
+    @DecimalMax(value = &quot;180.0&quot;, message = &quot;Longitude phải từ -180 đến 180&quot;)
+    private Double longitude;
+    
+    private Double accuracy;
+    private Double speed;
+    private Double heading;
+<span class="nc" id="L28">    @NotNull(message = &quot;isOnline must be boolean&quot;)</span>
+    @JsonDeserialize(using = OnlineFlagDeserializer.class)
+<span class="nc" id="L30">    private Boolean isOnline = true;</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

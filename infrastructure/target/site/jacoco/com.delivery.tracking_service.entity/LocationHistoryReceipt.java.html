@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LocationHistoryReceipt.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.entity</a> &gt; <span class="el_source">LocationHistoryReceipt.java</span></div><h1>LocationHistoryReceipt.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(name = &quot;location_history_receipts&quot;)
+@Getter
+@NoArgsConstructor
+public class LocationHistoryReceipt {
+
+    /** PENDING exists only inside the transaction that owns the first claim. */
+<span class="fc" id="L22">    public enum Outcome { PENDING, PERSISTED, SAMPLED_OUT, NO_DELIVERY, OFFLINE_TOMBSTONE }</span>
+
+    @Id
+    @Column(name = &quot;event_id&quot;, nullable = false, updatable = false)
+    private UUID eventId;
+
+    @Column(name = &quot;delivery_id&quot;)
+    private Long deliveryId;
+
+    @Column(name = &quot;shipper_id&quot;, nullable = false)
+    private Long shipperId;
+
+    @Column(name = &quot;occurred_at&quot;, nullable = false)
+    private Instant occurredAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = &quot;outcome&quot;, nullable = false, length = 32)
+    private Outcome outcome;
+
+    @Column(name = &quot;processed_at&quot;, nullable = false)
+    private Instant processedAt;
+
+    /** Null only for receipts committed before the fingerprint migration. */
+    @Column(name = &quot;payload_fingerprint&quot;, length = 64)
+    private String payloadFingerprint;
+
+    public LocationHistoryReceipt(UUID eventId, Long deliveryId, Long shipperId,
+                                  Instant occurredAt, Outcome outcome) {
+<span class="nc" id="L50">        this(eventId, deliveryId, shipperId, occurredAt, outcome, null);</span>
+<span class="nc" id="L51">    }</span>
+
+    public LocationHistoryReceipt(UUID eventId, Long deliveryId, Long shipperId,
+<span class="nc" id="L54">                                  Instant occurredAt, Outcome outcome, String payloadFingerprint) {</span>
+<span class="nc" id="L55">        this.eventId = eventId;</span>
+<span class="nc" id="L56">        this.deliveryId = deliveryId;</span>
+<span class="nc" id="L57">        this.shipperId = shipperId;</span>
+<span class="nc" id="L58">        this.occurredAt = occurredAt;</span>
+<span class="nc" id="L59">        this.outcome = outcome;</span>
+<span class="nc" id="L60">        this.processedAt = Instant.now();</span>
+<span class="nc" id="L61">        this.payloadFingerprint = payloadFingerprint;</span>
+<span class="nc" id="L62">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

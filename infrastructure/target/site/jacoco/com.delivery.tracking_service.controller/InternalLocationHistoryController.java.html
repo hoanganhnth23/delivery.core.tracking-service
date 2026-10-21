@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>InternalLocationHistoryController.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.controller</a> &gt; <span class="el_source">InternalLocationHistoryController.java</span></div><h1>InternalLocationHistoryController.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.controller;
+
+import com.delivery.tracking_service.dto.response.LocationHistoryPointResponse;
+import com.delivery.tracking.application.api.LocationHistoryUseCase;
+import com.delivery.auth.resourceserver.security.AuthenticatedActor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.List;
+
+@RestController
+@RequestMapping(&quot;/internal/tracking/location-history&quot;)
+<span class="nc" id="L24">@Slf4j</span>
+public class InternalLocationHistoryController {
+
+    private final LocationHistoryUseCase history;
+    private final byte[] internalSecret;
+
+    public InternalLocationHistoryController(
+            LocationHistoryUseCase history,
+<span class="nc" id="L32">            @Value(&quot;${app.internal.secret:}&quot;) String internalSecret) {</span>
+<span class="nc" id="L33">        this.history = history;</span>
+<span class="nc" id="L34">        this.internalSecret = internalSecret.getBytes(StandardCharsets.UTF_8);</span>
+<span class="nc" id="L35">    }</span>
+
+    @GetMapping(&quot;/deliveries/{deliveryId}&quot;)
+    public List&lt;LocationHistoryPointResponse&gt; byDelivery(
+            @PathVariable long deliveryId,
+            @RequestParam(defaultValue = &quot;100&quot;) int size,
+            @RequestHeader(value = &quot;X-Internal-Auth&quot;, required = false) String suppliedSecret,
+            @RequestHeader(value = &quot;Internal-Token&quot;, required = false) String internalToken,
+            @AuthenticationPrincipal AuthenticatedActor actor) {
+<span class="nc" id="L44">        long supportUserId = requireSupportAccess(suppliedSecret, internalToken, actor);</span>
+<span class="nc" id="L45">        List&lt;LocationHistoryPointResponse&gt; points = history.byDelivery(deliveryId, size)</span>
+<span class="nc" id="L46">                .stream().map(LocationHistoryPointResponse::from).toList();</span>
+<span class="nc" id="L47">        log.info(&quot;Location history support read: deliveryId={}, supportUserId={}, pointCount={}&quot;,</span>
+<span class="nc" id="L48">                deliveryId, supportUserId, points.size());</span>
+<span class="nc" id="L49">        return points;</span>
+    }
+
+    private long requireSupportAccess(String suppliedSecret, String internalToken, AuthenticatedActor actor) {
+<span class="nc bnc" id="L53" title="All 2 branches missed.">        byte[] supplied = suppliedSecret != null ? suppliedSecret.getBytes(StandardCharsets.UTF_8)</span>
+<span class="nc bnc" id="L54" title="All 2 branches missed.">                : (internalToken != null ? internalToken.getBytes(StandardCharsets.UTF_8) : new byte[0]);</span>
+
+<span class="nc bnc" id="L56" title="All 4 branches missed.">        boolean validSecret = internalSecret.length &gt; 0 &amp;&amp; MessageDigest.isEqual(internalSecret, supplied);</span>
+<span class="nc bnc" id="L57" title="All 8 branches missed.">        boolean isAdminActor = actor != null &amp;&amp; actor.isAdmin() &amp;&amp; actor.getUserId() != null &amp;&amp; actor.getUserId() &gt; 0;</span>
+
+<span class="nc bnc" id="L59" title="All 4 branches missed.">        if (!validSecret || !isAdminActor) {</span>
+<span class="nc" id="L60">            throw new ResponseStatusException(HttpStatus.FORBIDDEN, &quot;Support access required&quot;);</span>
+        }
+<span class="nc" id="L62">        return actor.getUserId();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

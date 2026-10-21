@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>WebSocketConfig.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.config</a> &gt; <span class="el_source">WebSocketConfig.java</span></div><h1>WebSocketConfig.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.config;
+
+import com.delivery.tracking_service.websocket.ShipperLocationWebSocketHandler;
+import com.delivery.observability.CorrelationId;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+import org.springframework.web.socket.WebSocketHandler;
+import org.springframework.web.socket.server.HandshakeInterceptor;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Locale;
+import java.util.Arrays;
+
+@Configuration
+@EnableWebSocket
+public class WebSocketConfig implements WebSocketConfigurer {
+
+<span class="nc" id="L29">    private static final List&lt;String&gt; TRACKING_ROLE_PRECEDENCE = List.of(&quot;ADMIN&quot;, &quot;SHIPPER&quot;, &quot;USER&quot;);</span>
+
+    private final ShipperLocationWebSocketHandler shipperLocationHandler;
+    private final JwtDecoder jwtDecoder;
+    private final String[] allowedOrigins;
+
+    public WebSocketConfig(
+            ShipperLocationWebSocketHandler shipperLocationHandler,
+            JwtDecoder jwtDecoder,
+            @Value(&quot;${app.websocket.allowed-origins:http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000}&quot;)
+<span class="nc" id="L39">            String allowedOrigins) {</span>
+<span class="nc" id="L40">        this.shipperLocationHandler = shipperLocationHandler;</span>
+<span class="nc" id="L41">        this.jwtDecoder = jwtDecoder;</span>
+<span class="nc" id="L42">        this.allowedOrigins = Arrays.stream(allowedOrigins.split(&quot;,&quot;))</span>
+<span class="nc" id="L43">                .map(String::trim)</span>
+<span class="nc bnc" id="L44" title="All 2 branches missed.">                .filter(origin -&gt; !origin.isBlank())</span>
+<span class="nc" id="L45">                .toArray(String[]::new);</span>
+<span class="nc" id="L46">    }</span>
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+<span class="nc" id="L50">        registry.addHandler(shipperLocationHandler, &quot;/ws/shipper-locations&quot;)</span>
+<span class="nc" id="L51">                .addInterceptors(identityHeadersInterceptor())</span>
+<span class="nc" id="L52">                .setAllowedOrigins(allowedOrigins);</span>
+<span class="nc" id="L53">    }</span>
+
+    HandshakeInterceptor identityHeadersInterceptor() {
+<span class="nc" id="L56">        return new HandshakeInterceptor() {</span>
+            @Override
+            public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
+                    WebSocketHandler wsHandler, Map&lt;String, Object&gt; attributes) {
+<span class="nc" id="L60">                HttpHeaders headers = request.getHeaders();</span>
+<span class="nc" id="L61">                String authHeader = headers.getFirst(&quot;Authorization&quot;);</span>
+<span class="nc" id="L62">                String token = null;</span>
+
+<span class="nc bnc" id="L64" title="All 4 branches missed.">                if (authHeader != null &amp;&amp; authHeader.startsWith(&quot;Bearer &quot;)) {</span>
+<span class="nc" id="L65">                    token = authHeader.substring(7);</span>
+                } else {
+<span class="nc" id="L67">                    List&lt;String&gt; protocols = headers.get(&quot;Sec-WebSocket-Protocol&quot;);</span>
+<span class="nc bnc" id="L68" title="All 4 branches missed.">                    if (protocols != null &amp;&amp; !protocols.isEmpty()) {</span>
+<span class="nc bnc" id="L69" title="All 2 branches missed.">                        for (String protocol : protocols) {</span>
+<span class="nc bnc" id="L70" title="All 2 branches missed.">                            for (String part : protocol.split(&quot;,&quot;)) {</span>
+<span class="nc" id="L71">                                String trimmed = part.trim();</span>
+<span class="nc bnc" id="L72" title="All 2 branches missed.">                                if (trimmed.startsWith(&quot;bearer.&quot;)) {</span>
+<span class="nc" id="L73">                                    token = trimmed.substring(7);</span>
+<span class="nc" id="L74">                                    break;</span>
+                                }
+                            }
+<span class="nc" id="L77">                        }</span>
+                    }
+                }
+
+<span class="nc" id="L81">                Long legacyUserId = null;</span>
+<span class="nc" id="L82">                Long principalId = null;</span>
+<span class="nc" id="L83">                Long identityClaimsVersion = null;</span>
+<span class="nc" id="L84">                String role = null;</span>
+
+<span class="nc bnc" id="L86" title="All 4 branches missed.">                if (token != null &amp;&amp; !token.isBlank()) {</span>
+                    try {
+<span class="nc" id="L88">                        Jwt jwt = jwtDecoder.decode(token);</span>
+                        // WebSocket must obey the same dual-claim rule as
+                        // HTTP resource endpoints. `sub` is deliberately not
+                        // read: R5 changes it from legacy profile ID to Auth
+                        // principal ID and treating it as a profile would map
+                        // a shipper request to the wrong aggregate.
+<span class="nc" id="L94">                        legacyUserId = positiveLong(jwt.getClaim(&quot;legacy_user_id&quot;));</span>
+<span class="nc" id="L95">                        principalId = positiveLong(jwt.getClaim(&quot;principal_id&quot;));</span>
+<span class="nc" id="L96">                        identityClaimsVersion = positiveLong(jwt.getClaim(&quot;identity_claims_version&quot;));</span>
+<span class="nc" id="L97">                        role = selectTrackingRole(jwt);</span>
+<span class="nc" id="L98">                    } catch (JwtException e) {</span>
+<span class="nc" id="L99">                        response.setStatusCode(HttpStatus.UNAUTHORIZED);</span>
+<span class="nc" id="L100">                        return false;</span>
+<span class="nc" id="L101">                    }</span>
+                }
+
+<span class="nc bnc" id="L104" title="All 6 branches missed.">                if (legacyUserId == null || principalId == null || identityClaimsVersion == null</span>
+<span class="nc bnc" id="L105" title="All 6 branches missed.">                        || identityClaimsVersion != 1L || role == null || role.isBlank()) {</span>
+<span class="nc" id="L106">                    response.setStatusCode(HttpStatus.UNAUTHORIZED);</span>
+<span class="nc" id="L107">                    return false;</span>
+                }
+
+<span class="nc" id="L110">                attributes.put(&quot;authenticatedUserId&quot;, legacyUserId);</span>
+<span class="nc" id="L111">                attributes.put(&quot;authenticatedPrincipalId&quot;, principalId);</span>
+<span class="nc" id="L112">                attributes.put(&quot;authenticatedRole&quot;, role);</span>
+                try {
+<span class="nc" id="L114">                    attributes.put(&quot;correlationId&quot;,</span>
+<span class="nc" id="L115">                            CorrelationId.requireValidOrCreate(headers.getFirst(CorrelationId.HEADER)));</span>
+<span class="nc" id="L116">                } catch (IllegalArgumentException invalidCorrelationId) {</span>
+<span class="nc" id="L117">                    response.setStatusCode(HttpStatus.BAD_REQUEST);</span>
+<span class="nc" id="L118">                    return false;</span>
+<span class="nc" id="L119">                }</span>
+<span class="nc" id="L120">                String traceparent = headers.getFirst(&quot;traceparent&quot;);</span>
+<span class="nc bnc" id="L121" title="All 2 branches missed.">                if (isW3cTraceparent(traceparent)) {</span>
+<span class="nc" id="L122">                    attributes.put(&quot;traceparent&quot;, traceparent);</span>
+                }
+<span class="nc" id="L124">                return true;</span>
+            }
+
+            @Override
+            public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response,
+                    WebSocketHandler wsHandler, Exception exception) {
+<span class="nc" id="L130">            }</span>
+        };
+    }
+
+    private static boolean isW3cTraceparent(String value) {
+<span class="nc bnc" id="L135" title="All 4 branches missed.">        return value != null &amp;&amp; value.matches(&quot;^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$&quot;);</span>
+    }
+
+    private static Long positiveLong(Object value) {
+<span class="nc bnc" id="L139" title="All 2 branches missed.">        if (value instanceof Number number) {</span>
+<span class="nc" id="L140">            long parsed = number.longValue();</span>
+<span class="nc bnc" id="L141" title="All 2 branches missed.">            return parsed &gt; 0 ? parsed : null;</span>
+        }
+<span class="nc bnc" id="L143" title="All 4 branches missed.">        if (!(value instanceof String raw) || !raw.matches(&quot;\\d+&quot;)) {</span>
+<span class="nc" id="L144">            return null;</span>
+        }
+        try {
+<span class="nc" id="L147">            long parsed = Long.parseLong(raw);</span>
+<span class="nc bnc" id="L148" title="All 2 branches missed.">            return parsed &gt; 0 ? parsed : null;</span>
+<span class="nc" id="L149">        } catch (NumberFormatException ignored) {</span>
+<span class="nc" id="L150">            return null;</span>
+        }
+    }
+
+    private static String selectTrackingRole(Jwt jwt) {
+<span class="nc" id="L155">        List&lt;String&gt; roles = jwt.getClaimAsStringList(&quot;roles&quot;);</span>
+<span class="nc bnc" id="L156" title="All 2 branches missed.">        if (roles != null) {</span>
+<span class="nc bnc" id="L157" title="All 2 branches missed.">            for (String preferredRole : TRACKING_ROLE_PRECEDENCE) {</span>
+<span class="nc" id="L158">                boolean present = roles.stream()</span>
+<span class="nc" id="L159">                        .filter(java.util.Objects::nonNull)</span>
+<span class="nc" id="L160">                        .map(String::trim)</span>
+<span class="nc" id="L161">                        .map(value -&gt; value.toUpperCase(Locale.ROOT))</span>
+<span class="nc" id="L162">                        .anyMatch(preferredRole::equals);</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">                if (present) {</span>
+<span class="nc" id="L164">                    return preferredRole;</span>
+                }
+<span class="nc" id="L166">            }</span>
+        }
+
+<span class="nc" id="L169">        String legacyRole = jwt.getClaimAsString(&quot;role&quot;);</span>
+<span class="nc bnc" id="L170" title="All 2 branches missed.">        if (legacyRole == null) {</span>
+<span class="nc" id="L171">            return null;</span>
+        }
+<span class="nc" id="L173">        String normalizedRole = legacyRole.trim().toUpperCase(Locale.ROOT);</span>
+<span class="nc bnc" id="L174" title="All 2 branches missed.">        return TRACKING_ROLE_PRECEDENCE.contains(normalizedRole) ? normalizedRole : null;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>

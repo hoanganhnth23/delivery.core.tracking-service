@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SecurityConfig.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">tracking-infrastructure</a> &gt; <a href="index.source.html" class="el_package">com.delivery.tracking_service.security</a> &gt; <span class="el_source">SecurityConfig.java</span></div><h1>SecurityConfig.java</h1><pre class="source lang-java linenums">package com.delivery.tracking_service.security;
+
+import com.delivery.auth.resourceserver.security.DeliveryJwtAuthenticationConverter;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+<span class="nc" id="L16">public class SecurityConfig {</span>
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http, DeliveryJwtAuthenticationConverter converter) throws Exception {
+<span class="nc" id="L20">        http.csrf(csrf -&gt; csrf.disable())</span>
+<span class="nc" id="L21">                .sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))</span>
+<span class="nc" id="L22">                .authorizeHttpRequests(auth -&gt; auth</span>
+<span class="nc" id="L23">                        .requestMatchers(&quot;/actuator/**&quot;).permitAll()</span>
+<span class="nc" id="L24">                        .requestMatchers(&quot;/internal/tracking/location-history/**&quot;).permitAll()</span>
+<span class="nc" id="L25">                        .requestMatchers(HttpMethod.POST, &quot;/api/tracking/internal/shippers/*/offline&quot;).permitAll()</span>
+<span class="nc" id="L26">                        .requestMatchers(&quot;/ws/**&quot;).permitAll() // WebSocket handshake handled separately by WebSocketConfig interceptor</span>
+<span class="nc" id="L27">                        .anyRequest().authenticated()</span>
+                )
+<span class="nc" id="L29">                .oauth2ResourceServer(oauth2 -&gt; oauth2</span>
+<span class="nc" id="L30">                        .jwt(jwt -&gt; jwt.jwtAuthenticationConverter(converter))</span>
+                );
+<span class="nc" id="L32">        return http.build();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.13.202504020838</span></div></body></html>
